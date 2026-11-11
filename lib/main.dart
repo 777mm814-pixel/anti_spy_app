@@ -1,3 +1,5 @@
+import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -7,6 +9,29 @@ import 'ui/main_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // التقاط أخطاء البناء وعرض واجهة بديلة بدل الشاشة الرمادية
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'حدث خطأ غير متوقع:\n\n${details.exceptionAsString()}',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  };
+
+  // التقاط الأخطاء غير المتزامنة التي لا يمر بها FlutterError
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint('Uncaught error: $error');
+    return true; // يمنع إغلاق التطبيق
+  };
+
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'anti_spy_channel',
@@ -14,7 +39,6 @@ void main() {
       channelDescription: 'Foreground service for Intruder Shield',
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
-    // الإصلاح: استخدام eventAction بدلًا من interval
     foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.repeat(5000),
       autoRunOnBoot: false,
