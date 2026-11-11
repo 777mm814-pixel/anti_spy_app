@@ -1,5 +1,6 @@
 import 'dart:io';
-import 'dart:ui'; // الإصلاح: استيراد مكتبة Size
+import 'dart:typed_data';
+import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -13,7 +14,7 @@ class DetectionService {
       options: FaceDetectorOptions(
         performanceMode: FaceDetectorMode.fast,
         enableTracking: false,
-        minFaceSize: 0.1,
+        minFaceSize: 0.15, // رفع الحد الأدنى لتحسين الدقة
       ),
     );
   }
@@ -38,17 +39,30 @@ class DetectionService {
   InputImage? _convertToInputImage(CameraImage image, CameraDescription camera) {
     try {
       if (Platform.isAndroid) {
-        final format = InputImageFormatValue.fromRawValue(image.format.raw);
-        if (format == null) return null;
-        return InputImage.fromBytes(
-          bytes: image.planes[0].bytes,
-          metadata: InputImageMetadata(
-            size: Size(image.width.toDouble(), image.height.toDouble()),
-            rotation: _getRotation(camera.sensorOrientation),
-            format: format,
-            bytesPerRow: image.planes[0].bytesPerRow,
-          ),
-        );
+        // التحقق من وجود 3 مستويات (YUV_420_888)
+        if (image.planes.length == 3) {
+          final nv21Bytes = _yuv420ToNv21(image);
+          return InputImage.fromBytes(
+            bytes: nv21Bytes,
+            metadata: InputImageMetadata(
+              size: Size(image.width.toDouble(), image.height.toDouble()),
+              rotation: _getRotation(camera.sensorOrientation),
+              format: InputImageFormat.nv21,
+              bytesPerRow: image.planes[0].bytesPerRow,
+            ),
+          );
+        } else if (image.planes.length == 1) {
+          // بعض الأجهزة توفر NV21 مباشرة
+          return InputImage.fromBytes(
+            bytes: image.planes[0].bytes,
+            metadata: InputImageMetadata(
+              size: Size(image.width.toDouble(), image.height.toDouble()),
+              rotation: _getRotation(camera.sensorOrientation),
+              format: InputImageFormat.nv21,
+              bytesPerRow: image.planes[0].bytesPerRow,
+            ),
+          );
+        }
       } else if (Platform.isIOS) {
         return InputImage.fromBytes(
           bytes: image.planes[0].bytes,
@@ -65,6 +79,48 @@ class DetectionService {
       debugPrint('Conversion error: $e');
       return null;
     }
+  }
+
+  /// تحويل YUV_420_888 إلى NV21 (Y + VU interleaved)
+  Uint8List _yuv420ToNv21(CameraImage image) {
+    final int width = image.width;
+    final int height = image.height;
+    final int ySize = width * height;
+    final int uvSize = (width * height) ~/ 2;
+    final nv21 = Uint8List(ySize + uvSize);
+
+    // 1. نسخ مستوى Y
+    final yPlane = image.planes[0];
+    final yBuffer = yPlane.bytes;
+    final yRowStride = yPlane.bytesPerRow;
+    final yPixelStride = yPlane.bytesPerPixel ?? 1;
+
+    int pos = 0;
+    for (int row = 0; row < height; row++) {
+      for (int col = 0; col < width; col++) {
+        final index = row * yRowStride + col * yPixelStride;
+        nv21[pos++] = yBuffer[index];
+      }
+    }
+
+    // 2. دمج مستويي U و V بالترتيب V ثم U (NV21)
+    final uPlane = image.planes[1];
+    final vPlane = image.planes[2];
+    final uBuffer = uPlane.bytes;
+    final vBuffer = vPlane.bytes;
+    final uvRowStride = uPlane.bytesPerRow;
+    final uvPixelStride = uPlane.bytesPerPixel ?? 2;
+
+    for (int row = 0; row < height ~/ 2; row++) {
+      for (int col = 0; col < width ~/ 2; col++) {
+        final uvIndex = row * uvRowStride + col * uvPixelStride;
+        // NV21: V أولاً ثم U
+        nv21[pos++] = vBuffer[uvIndex];
+        nv21[pos++] = uBuffer[uvIndex];
+      }
+    }
+
+    return nv21;
   }
 
   InputImageRotation _getRotation(int orientation) {
