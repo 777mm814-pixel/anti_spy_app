@@ -1,10 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 import '../models/app_settings.dart';
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
+
+  Future<void> _requestOverlayPermission(BuildContext context) async {
+    try {
+      final granted = await FlutterScreenOverlay.isPermissionGranted();
+      if (!granted) {
+        await FlutterScreenOverlay.requestPermission();
+      }
+    } catch (e) {
+      debugPrint('Overlay permission request failed: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +82,7 @@ class MainScreen extends StatelessWidget {
             trailing: const Icon(Icons.image),
             onTap: () async {
               final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-              if (!context.mounted) return; // الإصلاح: التحقق من mounted بعد await
+              if (!context.mounted) return;
               if (picked != null) {
                 context.read<AppSettings>().setDecoyImage(picked.path);
               }
@@ -81,6 +93,12 @@ class MainScreen extends StatelessWidget {
             subtitle: const Text('Vibrate lightly when an intruder is detected'),
             value: s.hapticEnabled,
             onChanged: (v) => context.read<AppSettings>().setHaptic(v),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => _requestOverlayPermission(context),
+            icon: const Icon(Icons.security),
+            label: const Text('طلب إذن الظهور فوق التطبيقات'),
           ),
         ],
       ),

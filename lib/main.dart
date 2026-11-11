@@ -9,6 +9,7 @@ import 'ui/main_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // عرض أي خطأ في بناء الواجهة بدلاً من شاشة رمادية
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return Material(
       color: Colors.black,
@@ -25,6 +26,7 @@ void main() {
     );
   };
 
+  // التقاط الأخطاء غير المتزامنة ومنع إغلاق التطبيق
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     debugPrint('Uncaught error: $error');
     return true;
@@ -49,13 +51,13 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // تأجيل التهيئة إلى ما بعد أول إطار لضمان جاهزية الواجهة
+    // تأجيل تهيئة الخدمة حتى تصبح الواجهة جاهزة فعلاً
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initForegroundTask();
+      _safeInitForegroundTask();
     });
   }
 
-  Future<void> _initForegroundTask() async {
+  Future<void> _safeInitForegroundTask() async {
     try {
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
@@ -72,9 +74,9 @@ class _MyAppState extends State<MyApp> {
           allowWifiLock: true,
         ),
       );
-      debugPrint('ForegroundTask initialized successfully');
+      debugPrint('ForegroundTask initialized');
     } catch (e) {
-      debugPrint('ForegroundTask init failed: $e');
+      debugPrint('ForegroundTask init failed (non-fatal): $e');
     }
   }
 
