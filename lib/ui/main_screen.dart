@@ -1,9 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../models/app_settings.dart';
 
-class MainScreen extends StatelessWidget {
+class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  PermissionStatus _cameraStatus = PermissionStatus.denied;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPermission();
+  }
+
+  Future<void> _checkPermission() async {
+    final status = await Permission.camera.status;
+    if (!mounted) return;
+    setState(() => _cameraStatus = status);
+  }
+
+  Future<void> _requestCameraPermission() async {
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+    setState(() => _cameraStatus = status);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +51,8 @@ class MainScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _buildPermissionCard(),
+          const SizedBox(height: 24),
           Center(
             child: GestureDetector(
               onTap: () => context.read<AppSettings>().setPower(!s.powerOn),
@@ -65,10 +93,58 @@ class MainScreen extends StatelessWidget {
           ),
           SwitchListTile(
             title: const Text('Silent Haptic Alert'),
+            subtitle: const Text('Vibration permission is granted at install'),
             value: s.hapticEnabled,
             onChanged: (v) => context.read<AppSettings>().setHaptic(v),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionCard() {
+    final bool isGranted = _cameraStatus.isGranted;
+    final bool isPermanentlyDenied = _cameraStatus.isPermanentlyDenied;
+
+    return Card(
+      elevation: 4,
+      color: isGranted ? Colors.green.shade900 : Colors.red.shade900,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(
+                  isGranted ? Icons.check_circle : Icons.error,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    isGranted
+                        ? 'تم منح إذن الكاميرا'
+                        : isPermanentlyDenied
+                            ? 'الإذن مرفوض نهائياً، افتح الإعدادات'
+                            : 'إذن الكاميرا مطلوب',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (!isGranted && !isPermanentlyDenied)
+              ElevatedButton(
+                onPressed: _requestCameraPermission,
+                child: const Text('طلب إذن الكاميرا'),
+              ),
+            if (isPermanentlyDenied)
+              ElevatedButton(
+                onPressed: () => openAppSettings(),
+                child: const Text('فتح إعدادات التطبيق'),
+              ),
+          ],
+        ),
       ),
     );
   }

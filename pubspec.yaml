@@ -1,5 +1,5 @@
 name: anti_spy_app
-description: Intruder Shield - Step 1 UI
+description: Intruder Shield - Step 2 Permissions
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   provider: ^6.1.2
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
