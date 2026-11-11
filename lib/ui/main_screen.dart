@@ -70,7 +70,10 @@ class MainScreen extends StatelessWidget {
             trailing: const Icon(Icons.image),
             onTap: () async {
               final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-              if (picked != null) context.read<AppSettings>().setDecoyImage(picked.path);
+              if (!context.mounted) return; // الإصلاح: التحقق من mounted بعد await
+              if (picked != null) {
+                context.read<AppSettings>().setDecoyImage(picked.path);
+              }
             },
           ),
           SwitchListTile(

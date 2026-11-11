@@ -36,9 +36,26 @@ void main() {
       child: const MyApp(),
     ),
   );
+}
 
-  // تأجيل تهيئة الخدمة حتى بعد عرض الواجهة، مع حماية من الانهيار
-  Future.delayed(const Duration(milliseconds: 500), () {
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // تأجيل التهيئة إلى ما بعد أول إطار لضمان جاهزية الواجهة
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initForegroundTask();
+    });
+  }
+
+  Future<void> _initForegroundTask() async {
     try {
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
@@ -55,14 +72,11 @@ void main() {
           allowWifiLock: true,
         ),
       );
+      debugPrint('ForegroundTask initialized successfully');
     } catch (e) {
       debugPrint('ForegroundTask init failed: $e');
     }
-  });
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  }
 
   @override
   Widget build(BuildContext context) {
