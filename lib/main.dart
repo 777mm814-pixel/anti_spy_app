@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'models/app_settings.dart';
+import 'models/locale_provider.dart';
 import 'ui/main_screen.dart';
 
 void main() {
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppSettings(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AppSettings()),
+        ChangeNotifierProvider(create: (_) => LocaleProvider()),
+      ],
       child: const MyApp(),
     ),
   );
@@ -18,6 +23,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeMode = context.watch<AppSettings>().themeMode;
+    final locale = context.watch<LocaleProvider>().locale;
 
     return MaterialApp(
       title: 'Intruder Shield',
@@ -29,6 +35,13 @@ class MyApp extends StatelessWidget {
         brightness: Brightness.dark,
       ),
       themeMode: themeMode,
+      locale: locale,
+      supportedLocales: const [Locale('en'), Locale('ar')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: const MainScreen(),
     );
   }

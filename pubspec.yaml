@@ -1,5 +1,5 @@
 name: anti_spy_app
-description: Intruder Shield - Step 2 Permissions
+description: Intruder Shield - Step 3 Overlay Perm & Localization
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -8,6 +8,8 @@ environment:
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
   provider: ^6.1.2
   permission_handler: ^11.3.1

@@ -1,8 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- إذن الكاميرا: يتطلب طلباً في وقت التشغيل -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- إذن الاهتزاز: لا يتطلب طلباً من المستخدم -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- إذن الظهور فوق التطبيقات الأخرى -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:label="Intruder Shield"
