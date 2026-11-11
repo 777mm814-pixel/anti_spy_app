@@ -38,6 +38,6 @@ class _OverlayViewState extends State<_OverlayView> {
     if (decoyPath != null && File(decoyPath!).existsSync()) {
       return Image.file(File(decoyPath!), fit: BoxFit.cover);
     }
-    return Container(color: Colors.black.withOpacity(opacity));
+    return Container(color: Colors.black.withValues(alpha: opacity));
   }
 }

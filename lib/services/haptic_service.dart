@@ -1,14 +1,16 @@
-import 'package:vibration_flutter/vibration_flutter.dart';
+import 'package:flutter/services.dart';
 
 class HapticService {
   static Future<void> init() async {
-    try { await HapticServicePlatform.instance.init(); } catch (_) {}
+    // لا حاجة لتهيئة مسبقة مع HapticFeedback
   }
 
   static Future<void> intruderAlert({required bool enabled}) async {
     if (!enabled) return;
     try {
-      await HapticServicePlatform.instance.play(HapticPreset.heavyImpact);
-    } catch (_) {}
+      await HapticFeedback.heavyImpact();
+    } catch (_) {
+      // تجاهل الأخطاء إن لم يدعم الجهاز الاهتزاز
+    }
   }
 }

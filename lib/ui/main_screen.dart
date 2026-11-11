@@ -36,7 +36,7 @@ class MainScreen extends StatelessWidget {
                   color: s.powerOn ? Colors.green : Colors.redAccent,
                   boxShadow: [
                     BoxShadow(
-                      color: (s.powerOn ? Colors.green : Colors.redAccent).withOpacity(0.4),
+                      color: (s.powerOn ? Colors.green : Colors.redAccent).withValues(alpha: 0.4),
                       blurRadius: 20,
                     )
                   ],
