@@ -59,9 +59,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _requestPermissions() async {
     try {
-      final cameraStatus = await Permission.camera.request();
-      debugPrint('Camera permission: $cameraStatus');
-
+      await Permission.camera.request();
       if (!await FlutterScreenOverlay.isPermissionGranted()) {
         await FlutterScreenOverlay.requestPermission();
       }

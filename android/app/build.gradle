@@ -43,9 +43,8 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            minifyEnabled false      // تعطيل R8 مؤقتاً
+            shrinkResources false
             signingConfig signingConfigs.debug
         }
     }
