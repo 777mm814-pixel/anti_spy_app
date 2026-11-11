@@ -2,14 +2,15 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 import 'models/app_settings.dart';
 import 'ui/main_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // عرض أي خطأ في بناء الواجهة بدلاً من شاشة رمادية
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return Material(
       color: Colors.black,
@@ -26,7 +27,6 @@ void main() {
     );
   };
 
-  // التقاط الأخطاء غير المتزامنة ومنع إغلاق التطبيق
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     debugPrint('Uncaught error: $error');
     return true;
@@ -51,10 +51,23 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // تأجيل تهيئة الخدمة حتى تصبح الواجهة جاهزة فعلاً
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _safeInitForegroundTask();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _requestPermissions();
+      await _safeInitForegroundTask();
     });
+  }
+
+  Future<void> _requestPermissions() async {
+    try {
+      final cameraStatus = await Permission.camera.request();
+      debugPrint('Camera permission: $cameraStatus');
+
+      if (!await FlutterScreenOverlay.isPermissionGranted()) {
+        await FlutterScreenOverlay.requestPermission();
+      }
+    } catch (e) {
+      debugPrint('Permission request failed: $e');
+    }
   }
 
   Future<void> _safeInitForegroundTask() async {
@@ -76,7 +89,7 @@ class _MyAppState extends State<MyApp> {
       );
       debugPrint('ForegroundTask initialized');
     } catch (e) {
-      debugPrint('ForegroundTask init failed (non-fatal): $e');
+      debugPrint('ForegroundTask init failed: $e');
     }
   }
 
@@ -86,10 +99,7 @@ class _MyAppState extends State<MyApp> {
 
     return MaterialApp(
       title: 'Intruder Shield',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.grey,
-      ),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.grey),
       darkTheme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.teal,
