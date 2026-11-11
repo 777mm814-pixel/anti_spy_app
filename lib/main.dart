@@ -9,7 +9,6 @@ import 'ui/main_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // التقاط أخطاء البناء وعرض واجهة بديلة بدل الشاشة الرمادية
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return Material(
       color: Colors.black,
@@ -26,27 +25,10 @@ void main() {
     );
   };
 
-  // التقاط الأخطاء غير المتزامنة التي لا يمر بها FlutterError
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     debugPrint('Uncaught error: $error');
-    return true; // يمنع إغلاق التطبيق
+    return true;
   };
-
-  FlutterForegroundTask.init(
-    androidNotificationOptions: AndroidNotificationOptions(
-      channelId: 'anti_spy_channel',
-      channelName: 'Intruder Shield',
-      channelDescription: 'Foreground service for Intruder Shield',
-    ),
-    iosNotificationOptions: const IOSNotificationOptions(),
-    foregroundTaskOptions: ForegroundTaskOptions(
-      eventAction: ForegroundTaskEventAction.repeat(5000),
-      autoRunOnBoot: false,
-      autoRunOnMyPackageReplaced: false,
-      allowWakeLock: true,
-      allowWifiLock: true,
-    ),
-  );
 
   runApp(
     ChangeNotifierProvider(
@@ -54,6 +36,29 @@ void main() {
       child: const MyApp(),
     ),
   );
+
+  // تأجيل تهيئة الخدمة حتى بعد عرض الواجهة، مع حماية من الانهيار
+  Future.delayed(const Duration(milliseconds: 500), () {
+    try {
+      FlutterForegroundTask.init(
+        androidNotificationOptions: AndroidNotificationOptions(
+          channelId: 'anti_spy_channel',
+          channelName: 'Intruder Shield',
+          channelDescription: 'Foreground service for Intruder Shield',
+        ),
+        iosNotificationOptions: const IOSNotificationOptions(),
+        foregroundTaskOptions: ForegroundTaskOptions(
+          eventAction: ForegroundTaskEventAction.repeat(5000),
+          autoRunOnBoot: false,
+          autoRunOnMyPackageReplaced: false,
+          allowWakeLock: true,
+          allowWifiLock: true,
+        ),
+      );
+    } catch (e) {
+      debugPrint('ForegroundTask init failed: $e');
+    }
+  });
 }
 
 class MyApp extends StatelessWidget {
