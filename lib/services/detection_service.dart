@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -14,7 +13,7 @@ class DetectionService {
       options: FaceDetectorOptions(
         performanceMode: FaceDetectorMode.fast,
         enableTracking: false,
-        minFaceSize: 0.15, // رفع الحد الأدنى لتحسين الدقة
+        minFaceSize: 0.15,
       ),
     );
   }
@@ -39,7 +38,6 @@ class DetectionService {
   InputImage? _convertToInputImage(CameraImage image, CameraDescription camera) {
     try {
       if (Platform.isAndroid) {
-        // التحقق من وجود 3 مستويات (YUV_420_888)
         if (image.planes.length == 3) {
           final nv21Bytes = _yuv420ToNv21(image);
           return InputImage.fromBytes(
@@ -52,7 +50,6 @@ class DetectionService {
             ),
           );
         } else if (image.planes.length == 1) {
-          // بعض الأجهزة توفر NV21 مباشرة
           return InputImage.fromBytes(
             bytes: image.planes[0].bytes,
             metadata: InputImageMetadata(
@@ -81,7 +78,6 @@ class DetectionService {
     }
   }
 
-  /// تحويل YUV_420_888 إلى NV21 (Y + VU interleaved)
   Uint8List _yuv420ToNv21(CameraImage image) {
     final int width = image.width;
     final int height = image.height;
@@ -89,7 +85,6 @@ class DetectionService {
     final int uvSize = (width * height) ~/ 2;
     final nv21 = Uint8List(ySize + uvSize);
 
-    // 1. نسخ مستوى Y
     final yPlane = image.planes[0];
     final yBuffer = yPlane.bytes;
     final yRowStride = yPlane.bytesPerRow;
@@ -103,7 +98,6 @@ class DetectionService {
       }
     }
 
-    // 2. دمج مستويي U و V بالترتيب V ثم U (NV21)
     final uPlane = image.planes[1];
     final vPlane = image.planes[2];
     final uBuffer = uPlane.bytes;
@@ -114,7 +108,6 @@ class DetectionService {
     for (int row = 0; row < height ~/ 2; row++) {
       for (int col = 0; col < width ~/ 2; col++) {
         final uvIndex = row * uvRowStride + col * uvPixelStride;
-        // NV21: V أولاً ثم U
         nv21[pos++] = vBuffer[uvIndex];
         nv21[pos++] = uBuffer[uvIndex];
       }

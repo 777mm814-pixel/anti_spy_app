@@ -39,7 +39,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // إيقاف الكاميرا عند الذهاب للخلفية لمنع الانهيار الأصلي
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       _stopCamera();
     } else if (state == AppLifecycleState.resumed) {
@@ -80,7 +79,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       final cameras = await availableCameras();
       if (cameras.isEmpty) return;
 
-      // اختيار الكاميرا الأمامية افتراضياً
       final frontCamera = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
@@ -91,7 +89,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.nv21,
-        imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await _cameraController!.initialize();
@@ -99,7 +96,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {});
 
-      // بدء تدفق الصور للكشف
       _cameraController!.startImageStream((CameraImage image) async {
         if (_isDetecting) return;
         _isDetecting = true;
@@ -187,7 +183,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 20),
           
-          // معاينة الكاميرا
           if (_cameraController != null && _cameraController!.value.isInitialized)
             Center(
               child: Container(
@@ -207,7 +202,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
           const SizedBox(height: 20),
           
-          // مؤشر حالة الكشف
           if (s.powerOn)
             Center(
               child: Text(
