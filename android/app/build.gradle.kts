@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.antispy.intruder_shield"
+    namespace = "com.example.anti_spy_app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.antispy.intruder_shield"
+        applicationId = "com.example.anti_spy_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
