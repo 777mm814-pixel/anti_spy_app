@@ -1,22 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 import '../models/app_settings.dart';
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
-
-  Future<void> _requestOverlayPermission(BuildContext context) async {
-    try {
-      final granted = await FlutterScreenOverlay.isPermissionGranted();
-      if (!granted) {
-        await FlutterScreenOverlay.requestPermission();
-      }
-    } catch (e) {
-      debugPrint('Overlay permission request failed: $e');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,52 +48,32 @@ class MainScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          _label('Overlay Opacity: ${(s.overlayOpacity * 100).round()}%'),
+          Text('Overlay Opacity: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
             value: s.overlayOpacity, min: 0.2, max: 1.0,
             onChanged: (v) => context.read<AppSettings>().setOpacity(v),
           ),
-          _label('Sensor Sensitivity: ${(s.sensitivity * 100).round()}%'),
+          const SizedBox(height: 12),
+          Text('Sensor Sensitivity: ${(s.sensitivity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
             value: s.sensitivity, min: 0.1, max: 1.0,
             onChanged: (v) => context.read<AppSettings>().setSensitivity(v),
           ),
+          const SizedBox(height: 12),
           SwitchListTile(
             title: const Text('Decoy / Camouflage Mode'),
-            subtitle: const Text('Show a custom image to the intruder'),
+            subtitle: const Text('(Feature disabled in clean build)'),
             value: s.decoyEnabled,
             onChanged: (v) => context.read<AppSettings>().setDecoy(v),
           ),
-          ListTile(
-            title: const Text('Choose Decoy Image'),
-            trailing: const Icon(Icons.image),
-            onTap: () async {
-              final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-              if (!context.mounted) return;
-              if (picked != null) {
-                context.read<AppSettings>().setDecoyImage(picked.path);
-              }
-            },
-          ),
           SwitchListTile(
             title: const Text('Silent Haptic Alert'),
-            subtitle: const Text('Vibrate lightly when an intruder is detected'),
+            subtitle: const Text('(Feature disabled in clean build)'),
             value: s.hapticEnabled,
             onChanged: (v) => context.read<AppSettings>().setHaptic(v),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => _requestOverlayPermission(context),
-            icon: const Icon(Icons.security),
-            label: const Text('طلب إذن الظهور فوق التطبيقات'),
           ),
         ],
       ),
     );
   }
-
-  Widget _label(String t) => Padding(
-    padding: const EdgeInsets.only(top: 12),
-    child: Text(t, style: const TextStyle(fontWeight: FontWeight.w600)),
-  );
 }

@@ -5,7 +5,6 @@ class AppSettings extends ChangeNotifier {
   double _overlayOpacity = 0.85;
   double _sensitivity = 0.5;
   bool _decoyEnabled = false;
-  String? _decoyImagePath;
   bool _hapticEnabled = true;
   ThemeMode _themeMode = ThemeMode.dark;
 
@@ -13,7 +12,6 @@ class AppSettings extends ChangeNotifier {
   double get overlayOpacity => _overlayOpacity;
   double get sensitivity => _sensitivity;
   bool get decoyEnabled => _decoyEnabled;
-  String? get decoyImagePath => _decoyImagePath;
   bool get hapticEnabled => _hapticEnabled;
   ThemeMode get themeMode => _themeMode;
 
@@ -21,7 +19,6 @@ class AppSettings extends ChangeNotifier {
   void setOpacity(double v) { _overlayOpacity = v.clamp(0.2, 1.0); notifyListeners(); }
   void setSensitivity(double v) { _sensitivity = v.clamp(0.1, 1.0); notifyListeners(); }
   void setDecoy(bool v) { _decoyEnabled = v; notifyListeners(); }
-  void setDecoyImage(String? p) { _decoyImagePath = p; notifyListeners(); }
   void setHaptic(bool v) { _hapticEnabled = v; notifyListeners(); }
   void setTheme(ThemeMode m) { _themeMode = m; notifyListeners(); }
 }

@@ -29,10 +29,6 @@ android {
         jvmTarget = '17'
     }
 
-    sourceSets {
-        main.java.srcDirs += 'src/main/kotlin'
-    }
-
     defaultConfig {
         applicationId "com.antispy.anti_spy_app"
         minSdk 23
@@ -43,7 +39,7 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false      // تعطيل R8 مؤقتاً
+            minifyEnabled false
             shrinkResources false
             signingConfig signingConfigs.debug
         }
