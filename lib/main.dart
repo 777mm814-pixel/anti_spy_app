@@ -6,8 +6,7 @@ import 'ui/main_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // إصلاح الخطأ الأول: إضافة المعاملات الإلزامية للحزمة
+
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'anti_spy_channel',
@@ -15,10 +14,11 @@ void main() {
       channelDescription: 'Foreground service for Intruder Shield',
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
-    foregroundTaskOptions: const ForegroundTaskOptions(
-      interval: 5000,
-      isOnceEvent: false,
+    // الإصلاح: استخدام eventAction بدلًا من interval
+    foregroundTaskOptions: ForegroundTaskOptions(
+      eventAction: ForegroundTaskEventAction.repeat(5000),
       autoRunOnBoot: false,
+      autoRunOnMyPackageReplaced: false,
       allowWakeLock: true,
       allowWifiLock: true,
     ),
@@ -34,14 +34,13 @@ void main() {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-  
+
   @override
   Widget build(BuildContext context) {
     final themeMode = context.watch<AppSettings>().themeMode;
-    
+
     return MaterialApp(
       title: 'Intruder Shield',
-      // إصلاح الخطأ الثاني: استخدام ThemeData مباشرة بدلاً من light() و dark()
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.grey,
