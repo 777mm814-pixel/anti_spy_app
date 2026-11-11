@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:camera/camera.dart';
 import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
+import '../services/detection_service.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -12,14 +14,38 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  final DetectionService _detectionService = DetectionService();
+  bool _isDetecting = false;
+  bool _hasIntruder = false;
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkPermissions();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stopCamera();
+    _detectionService.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // إيقاف الكاميرا عند الذهاب للخلفية لمنع الانهيار الأصلي
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _stopCamera();
+    } else if (state == AppLifecycleState.resumed) {
+      final s = context.read<AppSettings>();
+      if (s.powerOn) _startCameraAndDetect();
+    }
   }
 
   Future<void> _checkPermissions() async {
@@ -44,6 +70,81 @@ class _MainScreenState extends State<MainScreen> {
     setState(() => _overlayStatus = status);
   }
 
+  Future<void> _startCameraAndDetect() async {
+    if (_cameraStatus != PermissionStatus.granted) {
+      await _requestCameraPermission();
+      if (_cameraStatus != PermissionStatus.granted) return;
+    }
+
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+
+      // اختيار الكاميرا الأمامية افتراضياً
+      final frontCamera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _cameraController = CameraController(
+        frontCamera,
+        ResolutionPreset.low,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.nv21,
+      );
+
+      await _cameraController!.initialize();
+      
+      if (!mounted) return;
+      setState(() {});
+
+      // بدء تدفق الصور للكشف
+      _cameraController!.startImageStream((CameraImage image) async {
+        if (_isDetecting) return;
+        _isDetecting = true;
+
+        final faces = await _detectionService.detectFaces(image, frontCamera);
+        
+        if (!mounted) {
+          _isDetecting = false;
+          return;
+        }
+
+        setState(() {
+          _hasIntruder = faces.isNotEmpty;
+        });
+
+        _isDetecting = false;
+      });
+    } catch (e) {
+      debugPrint('Camera init error: $e');
+    }
+  }
+
+  Future<void> _stopCamera() async {
+    if (_cameraController != null) {
+      try {
+        if (_cameraController!.value.isStreamingImages) {
+          await _cameraController!.stopImageStream();
+        }
+        await _cameraController!.dispose();
+      } catch (_) {}
+      _cameraController = null;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _togglePower(AppSettings s) {
+    final newPower = !s.powerOn;
+    context.read<AppSettings>().setPower(newPower);
+    
+    if (newPower) {
+      _startCameraAndDetect();
+    } else {
+      _stopCamera();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppSettings>();
@@ -53,13 +154,10 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: Text(AppStrings.get(context, 'app_title')),
         actions: [
-          // زر تغيير اللغة
           IconButton(
             icon: const Icon(Icons.translate),
-            tooltip: 'Change Language',
             onPressed: () => localeProvider.toggleLocale(),
           ),
-          // زر تغيير الثيم
           IconButton(
             icon: Icon(s.themeMode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode),
             onPressed: () {
@@ -74,24 +172,59 @@ class _MainScreenState extends State<MainScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _buildPermissionCard(
-            title: AppStrings.get(context, _cameraStatus.isGranted ? 'camera_perm_granted' : _cameraStatus.isPermanentlyDenied ? 'camera_perm_denied' : 'camera_perm_required'),
+            title: AppStrings.get(context, _cameraStatus.isGranted ? 'camera_perm_granted' : 'camera_perm_required'),
             status: _cameraStatus,
             onRequest: _requestCameraPermission,
             buttonText: AppStrings.get(context, 'request_camera_perm'),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           _buildPermissionCard(
-            title: AppStrings.get(context, _overlayStatus.isGranted ? 'overlay_perm_granted' : _overlayStatus.isPermanentlyDenied ? 'overlay_perm_denied' : 'overlay_perm_required'),
+            title: AppStrings.get(context, _overlayStatus.isGranted ? 'overlay_perm_granted' : 'overlay_perm_required'),
             status: _overlayStatus,
             onRequest: _requestOverlayPermission,
             buttonText: AppStrings.get(context, 'request_overlay_perm'),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
+          
+          // معاينة الكاميرا
+          if (_cameraController != null && _cameraController!.value.isInitialized)
+            Center(
+              child: Container(
+                width: 220,
+                height: 280,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _hasIntruder ? Colors.red : Colors.green,
+                    width: 4,
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: CameraPreview(_cameraController!),
+              ),
+            ),
+
+          const SizedBox(height: 20),
+          
+          // مؤشر حالة الكشف
+          if (s.powerOn)
+            Center(
+              child: Text(
+                _hasIntruder ? '⚠️ متطفل تم رصده!' : '✅ المراقبة نشطة - لا يوجد متطفل',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _hasIntruder ? Colors.red : Colors.green,
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 16),
           Center(
             child: GestureDetector(
-              onTap: () => context.read<AppSettings>().setPower(!s.powerOn),
+              onTap: () => _togglePower(s),
               child: Container(
-                width: 120, height: 120,
+                width: 100, height: 100,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: s.powerOn ? Colors.green : Colors.redAccent,
@@ -104,12 +237,13 @@ class _MainScreenState extends State<MainScreen> {
                 ),
                 child: Icon(
                   s.powerOn ? Icons.shield : Icons.shield_outlined,
-                  color: Colors.white, size: 56,
+                  color: Colors.white, size: 48,
                 ),
               ),
             ),
           ),
           const SizedBox(height: 24),
+          
           Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
             value: s.overlayOpacity, min: 0.2, max: 1.0,
@@ -119,17 +253,6 @@ class _MainScreenState extends State<MainScreen> {
           Slider(
             value: s.sensitivity, min: 0.1, max: 1.0,
             onChanged: (v) => context.read<AppSettings>().setSensitivity(v),
-          ),
-          SwitchListTile(
-            title: Text(AppStrings.get(context, 'decoy_mode')),
-            value: s.decoyEnabled,
-            onChanged: (v) => context.read<AppSettings>().setDecoy(v),
-          ),
-          SwitchListTile(
-            title: Text(AppStrings.get(context, 'haptic_alert')),
-            subtitle: Text(AppStrings.get(context, 'haptic_subtitle')),
-            value: s.hapticEnabled,
-            onChanged: (v) => context.read<AppSettings>().setHaptic(v),
           ),
         ],
       ),
@@ -143,36 +266,14 @@ class _MainScreenState extends State<MainScreen> {
     required String buttonText,
   }) {
     final bool isGranted = status.isGranted;
-    final bool isPermanentlyDenied = status.isPermanentlyDenied;
-
     return Card(
-      elevation: 4,
       color: isGranted ? Colors.green.shade900 : Colors.red.shade900,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Icon(isGranted ? Icons.check_circle : Icons.error, color: Colors.white),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (!isGranted && !isPermanentlyDenied)
-              ElevatedButton(onPressed: onRequest, child: Text(buttonText)),
-            if (isPermanentlyDenied)
-              ElevatedButton(
-                onPressed: () => openAppSettings(),
-                child: Text(AppStrings.get(context, 'open_settings')),
-              ),
-          ],
+      child: ListTile(
+        leading: Icon(isGranted ? Icons.check_circle : Icons.error, color: Colors.white),
+        title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 13)),
+        trailing: isGranted ? null : TextButton(
+          onPressed: onRequest,
+          child: Text(buttonText, style: const TextStyle(color: Colors.white)),
         ),
       ),
     );
