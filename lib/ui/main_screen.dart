@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // الإصلاح: استيراد PlatformException
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:camera/camera.dart';
@@ -90,14 +90,27 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _toggleOverlay(bool show) async {
     if (!_overlayStatus.isGranted) {
-      debugPrint('Overlay permission not granted');
-      return;
+      debugPrint('Overlay permission not granted, requesting...');
+      await _requestOverlayPermission();
+      if (!_overlayStatus.isGranted) return;
     }
 
     try {
       if (show && !_isOverlayActive) {
+        // التأكد من الإذن الفعلي عبر الحزمة
+        final has = await FlutterScreenOverlay.isPermissionGranted();
+        if (!has) {
+          await FlutterScreenOverlay.requestPermission();
+          final granted = await FlutterScreenOverlay.isPermissionGranted();
+          if (!granted) {
+            debugPrint('Overlay permission still not granted after request');
+            return;
+          }
+        }
+
+        // تسخين المحرك لتقليل زمن الظهور
         await FlutterScreenOverlay.warmUp();
-        
+
         await FlutterScreenOverlay.showOverlay(
           height: WindowSize.matchParent,
           width: WindowSize.matchParent,
@@ -108,23 +121,28 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           enableDrag: false,
         );
         _isOverlayActive = true;
+        debugPrint('Overlay shown successfully');
 
         await Future.delayed(const Duration(milliseconds: 200));
-        
+
         if (!mounted) return;
         final s = context.read<AppSettings>();
         await FlutterScreenOverlay.shareData({
           'type': 'privacy',
           'opacity': s.overlayOpacity,
         });
-        debugPrint('Overlay shown with opacity ${s.overlayOpacity}');
+        debugPrint('Opacity sent: ${s.overlayOpacity}');
       } else if (!show && _isOverlayActive) {
         await FlutterScreenOverlay.closeOverlay();
         _isOverlayActive = false;
-        debugPrint('Overlay hidden');
+        debugPrint('Overlay closed');
       }
     } on PlatformException catch (e) {
-      debugPrint('Overlay PlatformException: ${e.code} - ${e.message}');
+      // الإصلاح: تسجيل رمز الخطأ بدلاً من الفشل الصامت
+      debugPrint('Overlay PlatformException: code=${e.code}, message=${e.message}');
+      if (e.code == 'SERVICE_START') {
+        debugPrint('FGS start failed — check battery optimization or FOREGROUND_SERVICE_SPECIAL_USE');
+      }
     } catch (e) {
       debugPrint('Overlay error: $e');
     }
@@ -164,7 +182,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         if (!mounted) { _isDetecting = false; return; }
 
         final newHasIntruder = faces.length >= 2;
-        
+
         setState(() {
           _faceCount = faces.length;
           _hasIntruder = newHasIntruder;
