@@ -24,6 +24,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isOverlayActive = false;
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
+  bool _isRequestingPermissions = false;
 
   @override
   void initState() {
@@ -63,21 +64,39 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _requestCameraPermission() async {
-    final status = await Permission.camera.request();
-    if (!mounted) return;
-    setState(() => _cameraStatus = status);
+    if (_isRequestingPermissions) return;
+    _isRequestingPermissions = true;
+    try {
+      final status = await Permission.camera.request();
+      if (!mounted) return;
+      setState(() => _cameraStatus = status);
+    } finally {
+      _isRequestingPermissions = false;
+    }
   }
 
   Future<void> _requestOverlayPermission() async {
-    final status = await Permission.systemAlertWindow.request();
-    if (!mounted) return;
-    setState(() => _overlayStatus = status);
+    if (_isRequestingPermissions) return;
+    _isRequestingPermissions = true;
+    try {
+      final status = await Permission.systemAlertWindow.request();
+      if (!mounted) return;
+      setState(() => _overlayStatus = status);
+    } finally {
+      _isRequestingPermissions = false;
+    }
   }
 
   Future<void> _toggleOverlay(bool show) async {
-    if (!_overlayStatus.isGranted) return;
+    // التحقق من الإذن قبل أي شيء
+    if (!_overlayStatus.isGranted) {
+      debugPrint('Overlay permission not granted');
+      return;
+    }
+
     try {
       if (show && !_isOverlayActive) {
+        debugPrint('Showing overlay...');
         await FlutterScreenOverlay.showOverlay(
           height: WindowSize.matchParent,
           width: WindowSize.matchParent,
@@ -88,19 +107,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           enableDrag: false,
         );
         _isOverlayActive = true;
-      } else if (!show && _isOverlayActive) {
-        await FlutterScreenOverlay.closeOverlay();
-        _isOverlayActive = false;
-      }
-
-      if (_isOverlayActive) {
-        // الإصلاح: التحقق من mounted قبل استخدام context بعد await
+        debugPrint('Overlay shown. Active: $_isOverlayActive');
+        
+        // تأخير بسيط لضمان جاهزية النافذة قبل إرسال البيانات
+        await Future.delayed(const Duration(milliseconds: 100));
+        
         if (!mounted) return;
         final s = context.read<AppSettings>();
         await FlutterScreenOverlay.shareData({
           'type': 'privacy',
           'opacity': s.overlayOpacity,
         });
+        debugPrint('Data shared: ${s.overlayOpacity}');
+      } else if (!show && _isOverlayActive) {
+        debugPrint('Hiding overlay...');
+        await FlutterScreenOverlay.closeOverlay();
+        _isOverlayActive = false;
+        debugPrint('Overlay hidden');
       }
     } catch (e) {
       debugPrint('Overlay error: $e');

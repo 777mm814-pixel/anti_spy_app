@@ -7,22 +7,28 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 class DetectionService {
   late final FaceDetector _detector;
   bool _isProcessing = false;
+  DateTime _lastProcessTime = DateTime.now();
 
   DetectionService() {
     _detector = FaceDetector(
       options: FaceDetectorOptions(
-        // تغيير النمط إلى دقيق لالتقاط الوجوه البعيدة بوضوح
         performanceMode: FaceDetectorMode.accurate,
         enableTracking: false,
-        // تقليل الحد الأدنى لحجم الوجه لرصد الأشخاص في الخلفية
-        minFaceSize: 0.05, 
+        minFaceSize: 0.1,
       ),
     );
   }
 
   Future<List<Face>> detectFaces(CameraImage image, CameraDescription camera) async {
+    // 1. منع المعالجة المتزامنة
     if (_isProcessing) return [];
+    
+    // 2. تقييد المعدل: تأكد من مرور 300 مللي ثانية على الأقل
+    final now = DateTime.now();
+    if (now.difference(_lastProcessTime).inMilliseconds < 300) return [];
+    
     _isProcessing = true;
+    _lastProcessTime = now;
 
     try {
       final inputImage = _convertToInputImage(image, camera);
