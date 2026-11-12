@@ -35,7 +35,6 @@ android {
     }
 }
 
-// الإصلاح: استخدام compilerOptions الجديد بدلاً من kotlinOptions المهمل
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
