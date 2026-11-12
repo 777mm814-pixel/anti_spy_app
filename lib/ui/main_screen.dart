@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // الإصلاح: استيراد PlatformException
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:camera/camera.dart';
@@ -88,7 +89,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleOverlay(bool show) async {
-    // التحقق من الإذن قبل أي شيء
     if (!_overlayStatus.isGranted) {
       debugPrint('Overlay permission not granted');
       return;
@@ -96,7 +96,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     try {
       if (show && !_isOverlayActive) {
-        debugPrint('Showing overlay...');
+        await FlutterScreenOverlay.warmUp();
+        
         await FlutterScreenOverlay.showOverlay(
           height: WindowSize.matchParent,
           width: WindowSize.matchParent,
@@ -107,10 +108,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           enableDrag: false,
         );
         _isOverlayActive = true;
-        debugPrint('Overlay shown. Active: $_isOverlayActive');
-        
-        // تأخير بسيط لضمان جاهزية النافذة قبل إرسال البيانات
-        await Future.delayed(const Duration(milliseconds: 100));
+
+        await Future.delayed(const Duration(milliseconds: 200));
         
         if (!mounted) return;
         final s = context.read<AppSettings>();
@@ -118,13 +117,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           'type': 'privacy',
           'opacity': s.overlayOpacity,
         });
-        debugPrint('Data shared: ${s.overlayOpacity}');
+        debugPrint('Overlay shown with opacity ${s.overlayOpacity}');
       } else if (!show && _isOverlayActive) {
-        debugPrint('Hiding overlay...');
         await FlutterScreenOverlay.closeOverlay();
         _isOverlayActive = false;
         debugPrint('Overlay hidden');
       }
+    } on PlatformException catch (e) {
+      debugPrint('Overlay PlatformException: ${e.code} - ${e.message}');
     } catch (e) {
       debugPrint('Overlay error: $e');
     }
@@ -153,7 +153,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       );
 
       await _cameraController!.initialize();
-
       if (!mounted) return;
       setState(() {});
 
@@ -162,21 +161,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         _isDetecting = true;
 
         final faces = await _detectionService.detectFaces(image, frontCamera);
-
-        if (!mounted) {
-          _isDetecting = false;
-          return;
-        }
+        if (!mounted) { _isDetecting = false; return; }
 
         final newHasIntruder = faces.length >= 2;
-        if (newHasIntruder != _hasIntruder) {
-          _hasIntruder = newHasIntruder;
-          await _toggleOverlay(_hasIntruder);
-        }
-
+        
         setState(() {
           _faceCount = faces.length;
+          _hasIntruder = newHasIntruder;
         });
+
+        if (newHasIntruder != _isOverlayActive) {
+          await _toggleOverlay(newHasIntruder);
+        }
 
         _isDetecting = false;
       });
