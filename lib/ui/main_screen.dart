@@ -19,6 +19,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final DetectionService _detectionService = DetectionService();
   bool _isDetecting = false;
   bool _hasIntruder = false;
+  int _faceCount = 0;
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
 
@@ -84,9 +85,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
+      // ترقية الدقة إلى High لرؤية أوضح للتفاصيل والوجوه البعيدة
       _cameraController = CameraController(
         frontCamera,
-        ResolutionPreset.medium,
+        ResolutionPreset.high, 
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.nv21,
       );
@@ -108,7 +110,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         }
 
         setState(() {
-          _hasIntruder = faces.isNotEmpty;
+          _faceCount = faces.length;
+          // المنطق الجديد: المتطفل هو أي وجه إضافي غير المستخدم الرئيسي
+          _hasIntruder = _faceCount >= 2;
         });
 
         _isDetecting = false;
@@ -186,8 +190,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           if (_cameraController != null && _cameraController!.value.isInitialized)
             Center(
               child: Container(
-                width: 220,
-                height: 280,
+                width: 240,
+                height: 300,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
@@ -204,13 +208,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           
           if (s.powerOn)
             Center(
-              child: Text(
-                _hasIntruder ? '⚠️ متطفل تم رصده!' : '✅ المراقبة نشطة - لا يوجد متطفل',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: _hasIntruder ? Colors.red : Colors.green,
-                ),
+              child: Column(
+                children: [
+                  Text(
+                    'عدد الوجوه المكتشفة: $_faceCount',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueGrey),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _hasIntruder ? '⚠️ تحذير: تم رصد شخص آخر!' : '✅ أنت فقط في الإطار',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _hasIntruder ? Colors.red : Colors.green,
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -238,17 +251,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 24),
-          
-          Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
-          Slider(
-            value: s.overlayOpacity, min: 0.2, max: 1.0,
-            onChanged: (v) => context.read<AppSettings>().setOpacity(v),
-          ),
-          Text('${AppStrings.get(context, 'sensor_sensitivity')}: ${(s.sensitivity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
-          Slider(
-            value: s.sensitivity, min: 0.1, max: 1.0,
-            onChanged: (v) => context.read<AppSettings>().setSensitivity(v),
-          ),
         ],
       ),
     );

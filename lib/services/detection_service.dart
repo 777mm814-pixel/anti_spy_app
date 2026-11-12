@@ -11,9 +11,11 @@ class DetectionService {
   DetectionService() {
     _detector = FaceDetector(
       options: FaceDetectorOptions(
-        performanceMode: FaceDetectorMode.fast,
+        // تغيير النمط إلى دقيق لالتقاط الوجوه البعيدة بوضوح
+        performanceMode: FaceDetectorMode.accurate,
         enableTracking: false,
-        minFaceSize: 0.15,
+        // تقليل الحد الأدنى لحجم الوجه لرصد الأشخاص في الخلفية
+        minFaceSize: 0.05, 
       ),
     );
   }
@@ -112,7 +114,6 @@ class DetectionService {
         nv21[pos++] = uBuffer[uvIndex];
       }
     }
-
     return nv21;
   }
 
