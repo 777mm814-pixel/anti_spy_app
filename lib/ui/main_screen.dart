@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:camera/camera.dart';
+import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
@@ -20,6 +21,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isDetecting = false;
   bool _hasIntruder = false;
   int _faceCount = 0;
+  bool _isOverlayActive = false;
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
 
@@ -33,6 +35,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _toggleOverlay(false);
     _stopCamera();
     _detectionService.dispose();
     super.dispose();
@@ -43,6 +46,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       _stopCamera();
     } else if (state == AppLifecycleState.resumed) {
+      if (!mounted) return;
       final s = context.read<AppSettings>();
       if (s.powerOn) _startCameraAndDetect();
     }
@@ -70,6 +74,39 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     setState(() => _overlayStatus = status);
   }
 
+  Future<void> _toggleOverlay(bool show) async {
+    if (!_overlayStatus.isGranted) return;
+    try {
+      if (show && !_isOverlayActive) {
+        await FlutterScreenOverlay.showOverlay(
+          height: WindowSize.matchParent,
+          width: WindowSize.matchParent,
+          alignment: OverlayAlignment.center,
+          flag: OverlayFlag.defaultFlag,
+          overlayTitle: 'Intruder Shield',
+          overlayContent: 'Privacy protection active',
+          enableDrag: false,
+        );
+        _isOverlayActive = true;
+      } else if (!show && _isOverlayActive) {
+        await FlutterScreenOverlay.closeOverlay();
+        _isOverlayActive = false;
+      }
+
+      if (_isOverlayActive) {
+        // الإصلاح: التحقق من mounted قبل استخدام context بعد await
+        if (!mounted) return;
+        final s = context.read<AppSettings>();
+        await FlutterScreenOverlay.shareData({
+          'type': 'privacy',
+          'opacity': s.overlayOpacity,
+        });
+      }
+    } catch (e) {
+      debugPrint('Overlay error: $e');
+    }
+  }
+
   Future<void> _startCameraAndDetect() async {
     if (_cameraStatus != PermissionStatus.granted) {
       await _requestCameraPermission();
@@ -85,16 +122,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
-      // ترقية الدقة إلى High لرؤية أوضح للتفاصيل والوجوه البعيدة
       _cameraController = CameraController(
         frontCamera,
-        ResolutionPreset.high, 
+        ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await _cameraController!.initialize();
-      
+
       if (!mounted) return;
       setState(() {});
 
@@ -103,16 +139,20 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         _isDetecting = true;
 
         final faces = await _detectionService.detectFaces(image, frontCamera);
-        
+
         if (!mounted) {
           _isDetecting = false;
           return;
         }
 
+        final newHasIntruder = faces.length >= 2;
+        if (newHasIntruder != _hasIntruder) {
+          _hasIntruder = newHasIntruder;
+          await _toggleOverlay(_hasIntruder);
+        }
+
         setState(() {
           _faceCount = faces.length;
-          // المنطق الجديد: المتطفل هو أي وجه إضافي غير المستخدم الرئيسي
-          _hasIntruder = _faceCount >= 2;
         });
 
         _isDetecting = false;
@@ -138,11 +178,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _togglePower(AppSettings s) {
     final newPower = !s.powerOn;
     context.read<AppSettings>().setPower(newPower);
-    
+
     if (newPower) {
       _startCameraAndDetect();
     } else {
       _stopCamera();
+      _toggleOverlay(false);
     }
   }
 
@@ -186,7 +227,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             buttonText: AppStrings.get(context, 'request_overlay_perm'),
           ),
           const SizedBox(height: 20),
-          
+
           if (_cameraController != null && _cameraController!.value.isInitialized)
             Center(
               child: Container(
@@ -205,7 +246,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
 
           const SizedBox(height: 20),
-          
+
           if (s.powerOn)
             Center(
               child: Column(
@@ -251,6 +292,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 24),
+
+          Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
+          Slider(
+            value: s.overlayOpacity, min: 0.2, max: 1.0,
+            onChanged: (v) {
+              context.read<AppSettings>().setOpacity(v);
+              if (_isOverlayActive) {
+                FlutterScreenOverlay.shareData({
+                  'type': 'privacy',
+                  'opacity': v,
+                });
+              }
+            },
+          ),
+          Text('${AppStrings.get(context, 'sensor_sensitivity')}: ${(s.sensitivity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
+          Slider(
+            value: s.sensitivity, min: 0.1, max: 1.0,
+            onChanged: (v) => context.read<AppSettings>().setSensitivity(v),
+          ),
         ],
       ),
     );
