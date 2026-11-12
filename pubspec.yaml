@@ -1,5 +1,5 @@
 name: anti_spy_app
-description: Intruder Shield - Step 4 Face Detection
+description: Intruder Shield
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -15,6 +15,7 @@ dependencies:
   permission_handler: ^11.3.1
   camera: ^0.11.0
   google_mlkit_face_detection: ^0.12.0
+  flutter_screen_overlay: ^1.0.7
 
 dev_dependencies:
   flutter_test:
