@@ -14,7 +14,7 @@ class DetectionService {
       options: FaceDetectorOptions(
         performanceMode: FaceDetectorMode.fast,
         enableTracking: false,
-        minFaceSize: 0.15,
+        minFaceSize: 0.1,
       ),
     );
   }
@@ -22,9 +22,9 @@ class DetectionService {
   Future<List<Face>> detectFaces(CameraImage image, CameraDescription camera) async {
     if (_isProcessing) return [];
     
-    // تقييد المعالجة لمرة واحدة كل 1000ms لمنع تعليق الهاتف
+    // تقييد المعالجة: 500ms كافية جداً لتخفيف الحمل مع استجابة سريعة للمتطفل
     final now = DateTime.now();
-    if (now.difference(_lastProcessTime).inMilliseconds < 1000) return [];
+    if (now.difference(_lastProcessTime).inMilliseconds < 500) return [];
     
     _isProcessing = true;
     _lastProcessTime = now;

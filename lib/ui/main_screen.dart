@@ -166,14 +166,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         final faces = await _detectionService.detectFaces(image, frontCamera);
         if (!mounted) { _isDetecting = false; return; }
 
-        final newHasIntruder = faces.length >= 2;
-        
-        if (newHasIntruder != _hasIntruder || faces.length != _faceCount) {
+        final newFaceCount = faces.length;
+        // المنطق الصحيح: متطفل إذا كان هناك وجهان أو أكثر
+        final newHasIntruder = newFaceCount >= 2;
+
+        // إعادة رسم الواجهة فقط عند التغير
+        if (newFaceCount != _faceCount || newHasIntruder != _hasIntruder) {
           setState(() {
-            _faceCount = faces.length;
+            _faceCount = newFaceCount;
             _hasIntruder = newHasIntruder;
           });
 
+          // إظهار/إخفاء التعتيم فوراً
           if (newHasIntruder != _isOverlayActive) {
             await _toggleOverlay(newHasIntruder);
           }
