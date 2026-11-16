@@ -148,10 +148,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
-      // الإصلاح: دقة متوسطة لتخفيف الحمل على المعالج
       _cameraController = CameraController(
         frontCamera,
-        ResolutionPreset.medium, 
+        ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.nv21,
       );
@@ -169,7 +168,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
         final newHasIntruder = faces.length >= 2;
         
-        // الإصلاح: لا تقم بتحديث الواجهة إلا إذا تغيرت القيم فعلياً لتوفير طاقة المعالج
         if (newHasIntruder != _hasIntruder || faces.length != _faceCount) {
           setState(() {
             _faceCount = faces.length;

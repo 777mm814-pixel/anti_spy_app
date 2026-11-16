@@ -12,7 +12,6 @@ class DetectionService {
   DetectionService() {
     _detector = FaceDetector(
       options: FaceDetectorOptions(
-        // الإصلاح: النمط السريع يستهلك موارد أقل بكثير
         performanceMode: FaceDetectorMode.fast,
         enableTracking: false,
         minFaceSize: 0.15,
@@ -23,7 +22,7 @@ class DetectionService {
   Future<List<Face>> detectFaces(CameraImage image, CameraDescription camera) async {
     if (_isProcessing) return [];
     
-    // الإصلاح: تقييد المعالجة لمرة واحدة كل ثانية (1000ms) لمنع تعليق الهاتف
+    // تقييد المعالجة لمرة واحدة كل 1000ms لمنع تعليق الهاتف
     final now = DateTime.now();
     if (now.difference(_lastProcessTime).inMilliseconds < 1000) return [];
     
