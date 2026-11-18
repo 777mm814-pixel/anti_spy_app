@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -26,6 +27,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
   bool _isRequestingPermissions = false;
+  Timer? _overlayTimer;
 
   @override
   void initState() {
@@ -37,6 +39,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _overlayTimer?.cancel();
     _toggleOverlay(false);
     _stopCamera();
     _detectionService.dispose();
@@ -50,7 +53,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.resumed) {
       if (!mounted) return;
       final s = context.read<AppSettings>();
-      if (s.powerOn) _startCameraAndDetect();
+      if (s.powerOn && !_isOverlayActive) _startCameraAndDetect();
     }
   }
 
@@ -133,11 +136,47 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
+  // المنطق الجديد: دورة التعتيم
+  void _triggerAutoOverlay() {
+    final s = context.read<AppSettings>();
+    if (!s.autoOverlay) {
+      // إذا كان الخيار مغلقاً، لا نفعل شيء سوى إظهار التحذير
+      return; 
+    }
+
+    // 1. إظهار الشاشة السوداء فوراً
+    _toggleOverlay(true);
+
+    // 2. إيقاف الكاميرا لتوفير موارد الهاتف (حل مشكلة التعليق)
+    _stopCamera();
+
+    // 3. بدء مؤقت لمدة دقيقة واحدة
+    _overlayTimer?.cancel();
+    _overlayTimer = Timer(const Duration(minutes: 1), () async {
+      // 4. إخفاء الشاشة السوداء
+      await _toggleOverlay(false);
+
+      // 5. إعادة تشغيل الكاميرا للتحقق
+      _startCameraAndDetect();
+
+      // 6. الانتظار 3 ثوانٍ لالتقاط النتيجة
+      await Future.delayed(const Duration(seconds: 3));
+
+      // 7. إذا كان المتطفل ما زال موجوداً، أعد الدورة
+      if (_faceCount >= 2 && mounted) {
+        _triggerAutoOverlay();
+      }
+    });
+  }
+
   Future<void> _startCameraAndDetect() async {
     if (_cameraStatus != PermissionStatus.granted) {
       await _requestCameraPermission();
       if (_cameraStatus != PermissionStatus.granted) return;
     }
+
+    // لا تبدأ الكاميرا إذا كانت الشاشة السوداء ظاهرة
+    if (_isOverlayActive) return;
 
     try {
       final cameras = await availableCameras();
@@ -160,26 +199,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       setState(() {});
 
       _cameraController!.startImageStream((CameraImage image) async {
-        if (_isDetecting) return;
+        if (_isDetecting || _isOverlayActive) return;
         _isDetecting = true;
 
         final faces = await _detectionService.detectFaces(image, frontCamera);
         if (!mounted) { _isDetecting = false; return; }
 
         final newFaceCount = faces.length;
-        // المنطق الصحيح: متطفل إذا كان هناك وجهان أو أكثر
         final newHasIntruder = newFaceCount >= 2;
 
-        // إعادة رسم الواجهة فقط عند التغير
         if (newFaceCount != _faceCount || newHasIntruder != _hasIntruder) {
           setState(() {
             _faceCount = newFaceCount;
             _hasIntruder = newHasIntruder;
           });
 
-          // إظهار/إخفاء التعتيم فوراً
-          if (newHasIntruder != _isOverlayActive) {
-            await _toggleOverlay(newHasIntruder);
+          // إذا ظهر متطفل، ابدأ دورة التعتيم
+          if (newHasIntruder && !_isOverlayActive) {
+            _triggerAutoOverlay();
           }
         }
 
@@ -210,6 +247,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (newPower) {
       _startCameraAndDetect();
     } else {
+      _overlayTimer?.cancel();
       _stopCamera();
       _toggleOverlay(false);
     }
@@ -256,7 +294,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 20),
 
-          if (_cameraController != null && _cameraController!.value.isInitialized)
+          if (_cameraController != null && _cameraController!.value.isInitialized && !_isOverlayActive)
             Center(
               child: Container(
                 width: 240,
@@ -320,6 +358,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 24),
+
+          // إضافة مفتاح التعتيم التلقائي هنا
+          SwitchListTile(
+            title: const Text('التعتيم التلقائي (حماية الموارد)'),
+            subtitle: const Text('عند إيقاف هذا الخيار، لن تظهر الشاشة السوداء لمنع تعليق الهاتف'),
+            value: s.autoOverlay,
+            onChanged: (v) => context.read<AppSettings>().setAutoOverlay(v),
+          ),
+          const Divider(),
 
           Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
