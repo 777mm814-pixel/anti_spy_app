@@ -1,11 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'models/app_settings.dart';
 import 'models/locale_provider.dart';
 import 'ui/main_screen.dart';
 
+// دالة top-level مطلوبة لبدء الخدمة من الواجهة
+@pragma('vm:entry-point')
+void startCallback() {
+  FlutterForegroundTask.setTaskHandler(IntruderTaskHandler());
+}
+
+class IntruderTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // تهيئة الكاميرا والكشف هنا عند بدء الخدمة
+  }
+
+  @override
+  Future<void> onRepeatEvent(DateTime timestamp) async {
+    // منطق الكشف عن المتطفل الدوري
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    // تنظيف الموارد عند إيقاف الخدمة
+  }
+}
+
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'intruder_service',
+      channelName: 'Intruder Shield Service',
+      channelDescription: 'Monitors for intruders',
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(),
+    foregroundTaskOptions: ForegroundTaskOptions(
+      eventAction: ForegroundTaskEventAction.repeat(5000),
+      autoRunOnBoot: true,
+      allowWakeLock: true,
+    ),
+  );
+
   runApp(
     MultiProvider(
       providers: [

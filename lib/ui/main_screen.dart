@@ -1,14 +1,11 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:camera/camera.dart';
-import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
-import '../services/detection_service.dart';
+import '../main.dart' show startCallback;
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -17,44 +14,14 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
-  CameraController? _cameraController;
-  final DetectionService _detectionService = DetectionService();
-  bool _isDetecting = false;
-  bool _hasIntruder = false;
-  int _faceCount = 0;
-  bool _isOverlayActive = false;
+class _MainScreenState extends State<MainScreen> {
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
-  bool _isRequestingPermissions = false;
-  Timer? _overlayTimer;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _checkPermissions();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _overlayTimer?.cancel();
-    _toggleOverlay(false);
-    _stopCamera();
-    _detectionService.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      _stopCamera();
-    } else if (state == AppLifecycleState.resumed) {
-      if (!mounted) return;
-      final s = context.read<AppSettings>();
-      if (s.powerOn && !_isOverlayActive) _startCameraAndDetect();
-    }
   }
 
   Future<void> _checkPermissions() async {
@@ -68,188 +35,29 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _requestCameraPermission() async {
-    if (_isRequestingPermissions) return;
-    _isRequestingPermissions = true;
-    try {
-      final status = await Permission.camera.request();
-      if (!mounted) return;
-      setState(() => _cameraStatus = status);
-    } finally {
-      _isRequestingPermissions = false;
-    }
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+    setState(() => _cameraStatus = status);
   }
 
   Future<void> _requestOverlayPermission() async {
-    if (_isRequestingPermissions) return;
-    _isRequestingPermissions = true;
-    try {
-      final status = await Permission.systemAlertWindow.request();
-      if (!mounted) return;
-      setState(() => _overlayStatus = status);
-    } finally {
-      _isRequestingPermissions = false;
-    }
+    final status = await Permission.systemAlertWindow.request();
+    if (!mounted) return;
+    setState(() => _overlayStatus = status);
   }
 
-  Future<void> _toggleOverlay(bool show) async {
-    if (!_overlayStatus.isGranted) {
-      await _requestOverlayPermission();
-      if (!_overlayStatus.isGranted) return;
-    }
-
-    try {
-      if (show && !_isOverlayActive) {
-        final has = await FlutterScreenOverlay.isPermissionGranted();
-        if (!has) {
-          await FlutterScreenOverlay.requestPermission();
-          final granted = await FlutterScreenOverlay.isPermissionGranted();
-          if (!granted) return;
-        }
-
-        await FlutterScreenOverlay.warmUp();
-        await FlutterScreenOverlay.showOverlay(
-          height: WindowSize.matchParent,
-          width: WindowSize.matchParent,
-          alignment: OverlayAlignment.center,
-          flag: OverlayFlag.defaultFlag,
-          overlayTitle: 'Intruder Shield',
-          overlayContent: 'Privacy protection active',
-          enableDrag: false,
-        );
-        _isOverlayActive = true;
-
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (!mounted) return;
-        final s = context.read<AppSettings>();
-        await FlutterScreenOverlay.shareData({
-          'type': 'privacy',
-          'opacity': s.overlayOpacity,
-        });
-      } else if (!show && _isOverlayActive) {
-        await FlutterScreenOverlay.closeOverlay();
-        _isOverlayActive = false;
-      }
-    } on PlatformException catch (e) {
-      debugPrint('Overlay PlatformException: ${e.code} - ${e.message}');
-    } catch (e) {
-      debugPrint('Overlay error: $e');
-    }
-  }
-
-  // المنطق الجديد: دورة التعتيم
-  void _triggerAutoOverlay() {
-    final s = context.read<AppSettings>();
-    if (!s.autoOverlay) {
-      // إذا كان الخيار مغلقاً، لا نفعل شيء سوى إظهار التحذير
-      return; 
-    }
-
-    // 1. إظهار الشاشة السوداء فوراً
-    _toggleOverlay(true);
-
-    // 2. إيقاف الكاميرا لتوفير موارد الهاتف (حل مشكلة التعليق)
-    _stopCamera();
-
-    // 3. بدء مؤقت لمدة دقيقة واحدة
-    _overlayTimer?.cancel();
-    _overlayTimer = Timer(const Duration(minutes: 1), () async {
-      // 4. إخفاء الشاشة السوداء
-      await _toggleOverlay(false);
-
-      // 5. إعادة تشغيل الكاميرا للتحقق
-      _startCameraAndDetect();
-
-      // 6. الانتظار 3 ثوانٍ لالتقاط النتيجة
-      await Future.delayed(const Duration(seconds: 3));
-
-      // 7. إذا كان المتطفل ما زال موجوداً، أعد الدورة
-      if (_faceCount >= 2 && mounted) {
-        _triggerAutoOverlay();
-      }
-    });
-  }
-
-  Future<void> _startCameraAndDetect() async {
-    if (_cameraStatus != PermissionStatus.granted) {
-      await _requestCameraPermission();
-      if (_cameraStatus != PermissionStatus.granted) return;
-    }
-
-    // لا تبدأ الكاميرا إذا كانت الشاشة السوداء ظاهرة
-    if (_isOverlayActive) return;
-
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) return;
-
-      final frontCamera = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
-
-      _cameraController = CameraController(
-        frontCamera,
-        ResolutionPreset.medium,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21,
-      );
-
-      await _cameraController!.initialize();
-      if (!mounted) return;
-      setState(() {});
-
-      _cameraController!.startImageStream((CameraImage image) async {
-        if (_isDetecting || _isOverlayActive) return;
-        _isDetecting = true;
-
-        final faces = await _detectionService.detectFaces(image, frontCamera);
-        if (!mounted) { _isDetecting = false; return; }
-
-        final newFaceCount = faces.length;
-        final newHasIntruder = newFaceCount >= 2;
-
-        if (newFaceCount != _faceCount || newHasIntruder != _hasIntruder) {
-          setState(() {
-            _faceCount = newFaceCount;
-            _hasIntruder = newHasIntruder;
-          });
-
-          // إذا ظهر متطفل، ابدأ دورة التعتيم
-          if (newHasIntruder && !_isOverlayActive) {
-            _triggerAutoOverlay();
-          }
-        }
-
-        _isDetecting = false;
-      });
-    } catch (e) {
-      debugPrint('Camera init error: $e');
-    }
-  }
-
-  Future<void> _stopCamera() async {
-    if (_cameraController != null) {
-      try {
-        if (_cameraController!.value.isStreamingImages) {
-          await _cameraController!.stopImageStream();
-        }
-        await _cameraController!.dispose();
-      } catch (_) {}
-      _cameraController = null;
-      if (mounted) setState(() {});
-    }
-  }
-
-  void _togglePower(AppSettings s) {
+  void _toggleService(AppSettings s) {
     final newPower = !s.powerOn;
     context.read<AppSettings>().setPower(newPower);
 
     if (newPower) {
-      _startCameraAndDetect();
+      FlutterForegroundTask.startService(
+        notificationTitle: 'Intruder Shield Active',
+        notificationText: 'Monitoring for intruders...',
+        callback: startCallback,
+      );
     } else {
-      _overlayTimer?.cancel();
-      _stopCamera();
-      _toggleOverlay(false);
+      FlutterForegroundTask.stopService();
     }
   }
 
@@ -292,54 +100,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             onRequest: _requestOverlayPermission,
             buttonText: AppStrings.get(context, 'request_overlay_perm'),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
-          if (_cameraController != null && _cameraController!.value.isInitialized && !_isOverlayActive)
-            Center(
-              child: Container(
-                width: 240,
-                height: 300,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: _hasIntruder ? Colors.red : Colors.green,
-                    width: 4,
-                  ),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: CameraPreview(_cameraController!),
-              ),
-            ),
-
-          const SizedBox(height: 20),
-
-          if (s.powerOn)
-            Center(
-              child: Column(
-                children: [
-                  Text(
-                    'عدد الوجوه المكتشفة: $_faceCount',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _hasIntruder ? '⚠️ تحذير: تم رصد شخص آخر!' : '✅ أنت فقط في الإطار',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _hasIntruder ? Colors.red : Colors.green,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          const SizedBox(height: 16),
           Center(
             child: GestureDetector(
-              onTap: () => _togglePower(s),
+              onTap: () => _toggleService(s),
               child: Container(
-                width: 100, height: 100,
+                width: 120, height: 120,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: s.powerOn ? Colors.green : Colors.redAccent,
@@ -352,17 +119,27 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 ),
                 child: Icon(
                   s.powerOn ? Icons.shield : Icons.shield_outlined,
-                  color: Colors.white, size: 48,
+                  color: Colors.white, size: 56,
                 ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: Text(
+              s.powerOn ? '🟢 الخدمة تعمل في الخلفية' : '🔴 الخدمة متوقفة',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: s.powerOn ? Colors.green : Colors.red,
               ),
             ),
           ),
           const SizedBox(height: 24),
 
-          // إضافة مفتاح التعتيم التلقائي هنا
           SwitchListTile(
-            title: const Text('التعتيم التلقائي (حماية الموارد)'),
-            subtitle: const Text('عند إيقاف هذا الخيار، لن تظهر الشاشة السوداء لمنع تعليق الهاتف'),
+            title: const Text('التعتيم التلقائي'),
+            subtitle: const Text('إظهار الشاشة السوداء عند رصد متطفل'),
             value: s.autoOverlay,
             onChanged: (v) => context.read<AppSettings>().setAutoOverlay(v),
           ),
@@ -371,15 +148,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
             value: s.overlayOpacity, min: 0.2, max: 1.0,
-            onChanged: (v) {
-              context.read<AppSettings>().setOpacity(v);
-              if (_isOverlayActive) {
-                FlutterScreenOverlay.shareData({
-                  'type': 'privacy',
-                  'opacity': v,
-                });
-              }
-            },
+            onChanged: (v) => context.read<AppSettings>().setOpacity(v),
           ),
           Text('${AppStrings.get(context, 'sensor_sensitivity')}: ${(s.sensitivity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
