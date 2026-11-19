@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // الإصلاح 1: استيراد PlatformException
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart'; // الإصلاح: استيراد الحزمة
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:camera/camera.dart';
+import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
 import '../services/background_service.dart' show startCallback;
+import '../services/detection_service.dart'; // الإصلاح 2: استيراد خدمة الكشف
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -14,14 +18,43 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  final DetectionService _detectionService = DetectionService(); // الإصلاح 3: تهيئة خدمة الكشف
+  bool _isDetecting = false;
+  bool _hasIntruder = false;
+  int _faceCount = 0;
+  bool _isOverlayActive = false;
   PermissionStatus _cameraStatus = PermissionStatus.denied;
   PermissionStatus _overlayStatus = PermissionStatus.denied;
+  bool _isRequestingPermissions = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkPermissions();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _toggleOverlay(false);
+    _stopCamera();
+    _detectionService.dispose(); // تنظيف موارد الكشف
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // لا نوقف الكاميرا عند التصغير؛ نتركها تعمل بفضل الخدمة الأمامية
+    if (state == AppLifecycleState.resumed) {
+      if (!mounted) return;
+      final s = context.read<AppSettings>();
+      if (s.powerOn && (_cameraController == null || !_cameraController!.value.isInitialized)) {
+        _startCameraAndDetect();
+      }
+    }
   }
 
   Future<void> _checkPermissions() async {
@@ -35,15 +68,146 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _requestCameraPermission() async {
-    final status = await Permission.camera.request();
-    if (!mounted) return;
-    setState(() => _cameraStatus = status);
+    if (_isRequestingPermissions) return;
+    _isRequestingPermissions = true;
+    try {
+      final status = await Permission.camera.request();
+      if (!mounted) return;
+      setState(() => _cameraStatus = status);
+    } finally {
+      _isRequestingPermissions = false;
+    }
   }
 
   Future<void> _requestOverlayPermission() async {
-    final status = await Permission.systemAlertWindow.request();
-    if (!mounted) return;
-    setState(() => _overlayStatus = status);
+    if (_isRequestingPermissions) return;
+    _isRequestingPermissions = true;
+    try {
+      final status = await Permission.systemAlertWindow.request();
+      if (!mounted) return;
+      setState(() => _overlayStatus = status);
+    } finally {
+      _isRequestingPermissions = false;
+    }
+  }
+
+  Future<void> _toggleOverlay(bool show) async {
+    if (!_overlayStatus.isGranted) {
+      await _requestOverlayPermission();
+      if (!_overlayStatus.isGranted) return;
+    }
+
+    try {
+      if (show && !_isOverlayActive) {
+        final has = await FlutterScreenOverlay.isPermissionGranted();
+        if (!has) {
+          await FlutterScreenOverlay.requestPermission();
+          final granted = await FlutterScreenOverlay.isPermissionGranted();
+          if (!granted) return;
+        }
+
+        await FlutterScreenOverlay.warmUp();
+        await FlutterScreenOverlay.showOverlay(
+          height: WindowSize.matchParent,
+          width: WindowSize.matchParent,
+          alignment: OverlayAlignment.center,
+          flag: OverlayFlag.defaultFlag,
+          overlayTitle: 'Intruder Shield',
+          overlayContent: 'Privacy protection active',
+          enableDrag: false,
+        );
+        _isOverlayActive = true;
+
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (!mounted) return;
+        final s = context.read<AppSettings>();
+        await FlutterScreenOverlay.shareData({
+          'type': 'privacy',
+          'opacity': s.overlayOpacity,
+        });
+      } else if (!show && _isOverlayActive) {
+        await FlutterScreenOverlay.closeOverlay();
+        _isOverlayActive = false;
+      }
+    } on PlatformException catch (e) {
+      debugPrint('Overlay PlatformException: ${e.code} - ${e.message}');
+    } catch (e) {
+      debugPrint('Overlay error: $e');
+    }
+  }
+
+  Future<void> _startCameraAndDetect() async {
+    if (_cameraStatus != PermissionStatus.granted) {
+      await _requestCameraPermission();
+      if (_cameraStatus != PermissionStatus.granted) return;
+    }
+
+    if (_cameraController != null && _cameraController!.value.isInitialized) return;
+
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+
+      final frontCamera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _cameraController = CameraController(
+        frontCamera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.nv21,
+      );
+
+      await _cameraController!.initialize();
+      if (!mounted) return;
+      setState(() {});
+
+      // الإصلاح 4: إعادة منطق الكشف الحقيقي باستخدام ML Kit
+      _cameraController!.startImageStream((CameraImage image) async {
+        if (_isDetecting || _isOverlayActive) return;
+        _isDetecting = true;
+
+        final faces = await _detectionService.detectFaces(image, frontCamera);
+        if (!mounted) { _isDetecting = false; return; }
+
+        final newFaceCount = faces.length;
+        final newHasIntruder = newFaceCount >= 2;
+
+        if (newFaceCount != _faceCount || newHasIntruder != _hasIntruder) {
+          setState(() {
+            _faceCount = newFaceCount;
+            _hasIntruder = newHasIntruder;
+          });
+
+          final s = context.read<AppSettings>();
+          // إذا ظهر متطفل وكان التعتيم التلقائي مفعلاً، أظهر الشاشة السوداء
+          if (newHasIntruder && s.autoOverlay && !_isOverlayActive) {
+            await _toggleOverlay(true);
+          } else if (!newHasIntruder && _isOverlayActive) {
+            await _toggleOverlay(false);
+          }
+        }
+
+        _isDetecting = false;
+      });
+    } catch (e) {
+      debugPrint('Camera init error: $e');
+    }
+  }
+
+  Future<void> _stopCamera() async {
+    if (_cameraController != null) {
+      try {
+        if (_cameraController!.value.isStreamingImages) {
+          await _cameraController!.stopImageStream();
+        }
+        await _cameraController!.dispose();
+      } catch (_) {}
+      _cameraController = null;
+      if (mounted) setState(() {});
+    }
   }
 
   void _toggleService(AppSettings s) {
@@ -53,11 +217,14 @@ class _MainScreenState extends State<MainScreen> {
     if (newPower) {
       FlutterForegroundTask.startService(
         notificationTitle: 'Intruder Shield Active',
-        notificationText: 'Monitoring for intruders...',
+        notificationText: 'Monitoring for intruders in background...',
         callback: startCallback,
       );
+      _startCameraAndDetect();
     } else {
       FlutterForegroundTask.stopService();
+      _stopCamera();
+      _toggleOverlay(false);
     }
   }
 
@@ -134,6 +301,17 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          if (s.powerOn)
+            Center(
+              child: Text(
+                'الوجوه المكتشفة: $_faceCount | ${_hasIntruder ? "⚠️ متطفل" : "✅ آمن"}',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _hasIntruder ? Colors.red : Colors.green,
+                ),
+              ),
+            ),
           const SizedBox(height: 24),
           SwitchListTile(
             title: const Text('التعتيم التلقائي'),
