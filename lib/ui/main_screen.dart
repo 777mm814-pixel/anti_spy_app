@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart'; // الإصلاح: استيراد الحزمة
 import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
@@ -145,7 +145,6 @@ class _MainScreenState extends State<MainScreen> {
           Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
             value: s.overlayOpacity, min: 0.2, max: 1.0,
-            // الإصلاح: استخدم setOpacity بدلاً من setOverlayOpacity
             onChanged: (v) => context.read<AppSettings>().setOpacity(v),
           ),
           Text('${AppStrings.get(context, 'sensor_sensitivity')}: ${(s.sensitivity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
