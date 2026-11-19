@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // الإصلاح 1: استيراد PlatformException
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -9,7 +9,7 @@ import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
 import '../services/background_service.dart' show startCallback;
-import '../services/detection_service.dart'; // الإصلاح 2: استيراد خدمة الكشف
+import '../services/detection_service.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -20,7 +20,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   CameraController? _cameraController;
-  final DetectionService _detectionService = DetectionService(); // الإصلاح 3: تهيئة خدمة الكشف
+  final DetectionService _detectionService = DetectionService();
   bool _isDetecting = false;
   bool _hasIntruder = false;
   int _faceCount = 0;
@@ -41,17 +41,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _toggleOverlay(false);
     _stopCamera();
-    _detectionService.dispose(); // تنظيف موارد الكشف
+    _detectionService.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // لا نوقف الكاميرا عند التصغير؛ نتركها تعمل بفضل الخدمة الأمامية
     if (state == AppLifecycleState.resumed) {
       if (!mounted) return;
       final s = context.read<AppSettings>();
-      if (s.powerOn && (_cameraController == null || !_cameraController!.value.isInitialized)) {
+      if (s.powerOn && !_isOverlayActive && (_cameraController == null || !_cameraController!.value.isInitialized)) {
         _startCameraAndDetect();
       }
     }
@@ -99,11 +98,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     try {
       if (show && !_isOverlayActive) {
+        await _stopCamera();
+        _isOverlayActive = true;
+
         final has = await FlutterScreenOverlay.isPermissionGranted();
         if (!has) {
           await FlutterScreenOverlay.requestPermission();
           final granted = await FlutterScreenOverlay.isPermissionGranted();
-          if (!granted) return;
+          if (!granted) { _isOverlayActive = false; return; }
         }
 
         await FlutterScreenOverlay.warmUp();
@@ -116,7 +118,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           overlayContent: 'Privacy protection active',
           enableDrag: false,
         );
-        _isOverlayActive = true;
 
         await Future.delayed(const Duration(milliseconds: 200));
         if (!mounted) return;
@@ -128,10 +129,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       } else if (!show && _isOverlayActive) {
         await FlutterScreenOverlay.closeOverlay();
         _isOverlayActive = false;
+        // الإصلاح: التحقق من mounted قبل استخدام context بعد await
+        if (!mounted) return;
+        final s = context.read<AppSettings>();
+        if (s.powerOn) _startCameraAndDetect();
       }
     } on PlatformException catch (e) {
+      _isOverlayActive = false;
       debugPrint('Overlay PlatformException: ${e.code} - ${e.message}');
     } catch (e) {
+      _isOverlayActive = false;
       debugPrint('Overlay error: $e');
     }
   }
@@ -155,7 +162,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
       _cameraController = CameraController(
         frontCamera,
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.nv21,
       );
@@ -164,7 +171,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {});
 
-      // الإصلاح 4: إعادة منطق الكشف الحقيقي باستخدام ML Kit
       _cameraController!.startImageStream((CameraImage image) async {
         if (_isDetecting || _isOverlayActive) return;
         _isDetecting = true;
@@ -182,7 +188,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           });
 
           final s = context.read<AppSettings>();
-          // إذا ظهر متطفل وكان التعتيم التلقائي مفعلاً، أظهر الشاشة السوداء
           if (newHasIntruder && s.autoOverlay && !_isOverlayActive) {
             await _toggleOverlay(true);
           } else if (!newHasIntruder && _isOverlayActive) {
@@ -305,7 +310,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           if (s.powerOn)
             Center(
               child: Text(
-                'الوجوه المكتشفة: $_faceCount | ${_hasIntruder ? "⚠️ متطفل" : "✅ آمن"}',
+                'الوجوه: $_faceCount | ${_hasIntruder ? "⚠️ متطفل" : "✅ آمن"}',
                 style: TextStyle(
                   fontSize: 14,
                   color: _hasIntruder ? Colors.red : Colors.green,
