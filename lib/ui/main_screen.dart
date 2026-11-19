@@ -5,7 +5,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../models/app_settings.dart';
 import '../models/locale_provider.dart';
 import '../utils/app_strings.dart';
-import '../main.dart' show startCallback;
+import '../services/background_service.dart' show startCallback;
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -101,7 +101,6 @@ class _MainScreenState extends State<MainScreen> {
             buttonText: AppStrings.get(context, 'request_overlay_perm'),
           ),
           const SizedBox(height: 24),
-
           Center(
             child: GestureDetector(
               onTap: () => _toggleService(s),
@@ -136,7 +135,6 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
           SwitchListTile(
             title: const Text('التعتيم التلقائي'),
             subtitle: const Text('إظهار الشاشة السوداء عند رصد متطفل'),
@@ -144,10 +142,10 @@ class _MainScreenState extends State<MainScreen> {
             onChanged: (v) => context.read<AppSettings>().setAutoOverlay(v),
           ),
           const Divider(),
-
           Text('${AppStrings.get(context, 'overlay_opacity')}: ${(s.overlayOpacity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
           Slider(
             value: s.overlayOpacity, min: 0.2, max: 1.0,
+            // الإصلاح: استخدم setOpacity بدلاً من setOverlayOpacity
             onChanged: (v) => context.read<AppSettings>().setOpacity(v),
           ),
           Text('${AppStrings.get(context, 'sensor_sensitivity')}: ${(s.sensitivity * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
