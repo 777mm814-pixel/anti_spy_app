@@ -5,29 +5,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'models/app_settings.dart';
 import 'models/locale_provider.dart';
 import 'ui/main_screen.dart';
-
-// دالة top-level مطلوبة لبدء الخدمة من الواجهة
-@pragma('vm:entry-point')
-void startCallback() {
-  FlutterForegroundTask.setTaskHandler(IntruderTaskHandler());
-}
-
-class IntruderTaskHandler extends TaskHandler {
-  @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    // تهيئة الكاميرا والكشف هنا عند بدء الخدمة
-  }
-
-  @override
-  Future<void> onRepeatEvent(DateTime timestamp) async {
-    // منطق الكشف عن المتطفل الدوري
-  }
-
-  @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
-    // تنظيف الموارد عند إيقاف الخدمة
-  }
-}
+// ignore: unused_import
+import 'ui/overlay_entry.dart'; // ضروري لتضمين overlayMain كنقطة دخول
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

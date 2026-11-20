@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 @pragma('vm:entry-point')
 void overlayMain() {
@@ -19,7 +19,7 @@ class _OverlayAppState extends State<OverlayApp> {
   @override
   void initState() {
     super.initState();
-    FlutterScreenOverlay.overlayListener.listen((event) {
+    FlutterOverlayWindow.overlayListener.listen((event) {
       if (!mounted) return;
       if (event is Map && event['type'] == 'privacy') {
         setState(() {
