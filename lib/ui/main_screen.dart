@@ -48,7 +48,7 @@ class _MainScreenState extends State<MainScreen> {
       if (await FlutterOverlayWindow.isPermissionGranted() == false) return;
     }
 
-    // الإصلاح: إزالة isolateEntryPoint، فالحزمة تكتشف overlayMain تلقائياً
+    // استدعاء showOverlay بدون isolateEntryPoint، فالحزمة تكتشف overlayMain تلقائياً
     await FlutterOverlayWindow.showOverlay(
       height: WindowSize.matchParent,
       width: WindowSize.matchParent,
