@@ -1,0 +1,28 @@
+name: intruder_shield
+description: "Intruder Shield - Anti-Spy Camera Monitor"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  provider: ^6.1.2
+  camera: ^0.11.0+2
+  google_mlkit_face_detection: ^0.12.0
+  flutter_foreground_task: ^9.2.2
+  flutter_overlay_window: ^0.5.0
+  permission_handler: ^11.3.1
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
