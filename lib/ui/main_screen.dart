@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:intruder_shield/models/app_settings.dart';
 import 'package:intruder_shield/services/background_service.dart';
+import 'package:intruder_shield/services/detection_service.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -16,6 +19,14 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final _settings = AppSettings();
   final List<String> _logs = [];
+
+  // إدارة الكاميرا والكشف في الواجهة
+  CameraController? _cameraController;
+  DetectionService? _detectionService;
+  Timer? _frameTimer;
+  int _lastProcessedMs = 0;
+  bool _isMonitoring = false;
+  bool _isOverlayActive = false;
 
   @override
   void initState() {
@@ -48,37 +59,140 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _logs.insert(0, '[${DateTime.now().toString().substring(11, 19)}] $message');
-      if (_logs.length > 20) _logs.removeLast();
+      if (_logs.length > 30) _logs.removeLast();
     });
   }
 
   void _onReceiveTaskData(Object data) {
     if (data is! Map) return;
-
-    switch (data['action']) {
-      case 'SHOW_OVERLAY':
-        _addLog('🚨 متطفل detected! وجهان أو أكثر (count: ${data['faceCount']})');
-        _showBlackOverlay();
-        break;
-      case 'HIDE_OVERLAY':
-        _addLog('✅ إغلاق الأوفرلاي واستئناف المراقبة');
-        _hideBlackOverlay();
-        break;
-      case 'CAMERA_READY':
-        _addLog('📷 الكاميرا جاهزة (${data['resolution']})');
-        break;
-      case 'FACE_RESULT':
-        _addLog('👁️ وجوه: ${data['count']} | إطار: ${data['frameSize']}');
-        break;
-      case 'DIAGNOSTIC':
-        _addLog('📊 إطارات: ${data['frames']} | اكتشافات: ${data['faces']} | Overlay: ${data['overlayActive']}');
-        break;
-      case 'ERROR':
-        _addLog('❌ خطأ: ${data['message']}');
-        break;
+    if (data['action'] == 'SERVICE_ALIVE') {
+      // الخدمة حية، لا حاجة لفعل شيء
     }
   }
 
+  // ============ إدارة الكاميرا (في الواجهة) ============
+  Future<void> _startCameraMonitoring() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        _addLog('❌ لا توجد كاميرات متاحة');
+        return;
+      }
+
+      final frontCamera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _cameraController = CameraController(
+        frontCamera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+      );
+
+      await _cameraController!.initialize();
+      _detectionService ??= DetectionService();
+      _isMonitoring = true;
+
+      await _cameraController!.startImageStream(_onCameraImage);
+      _addLog('📷 الكاميرا جاهزة (${_cameraController!.value.previewSize?.width.toInt()}x${_cameraController!.value.previewSize?.height.toInt()})');
+
+      // مؤقت لتشخيص الحالة
+      _frameTimer?.cancel();
+      _frameTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!_isMonitoring) return;
+        _addLog('📊 المراقبة نشطة | Overlay: $_isOverlayActive');
+      });
+    } catch (e) {
+      _addLog('❌ فشل تشغيل الكاميرا: $e');
+    }
+  }
+
+  void _onCameraImage(CameraImage image) async {
+    if (!_isMonitoring || _isOverlayActive) return;
+    if (_detectionService == null || _cameraController == null) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastProcessedMs < 800) return;
+    _lastProcessedMs = now;
+
+    try {
+      final faceCount = await _detectionService!.processCameraImage(
+        image,
+        _cameraController!.description,
+      );
+
+      if (!mounted) return;
+
+      _addLog('👁️ وجوه: $faceCount | إطار: ${image.width}x${image.height}');
+
+      if (faceCount >= 2 && !_isOverlayActive) {
+        await _handleIntruderDetected();
+      }
+    } catch (e) {
+      _addLog('❌ خطأ في الكشف: $e');
+    }
+  }
+
+  Future<void> _handleIntruderDetected() async {
+    _isOverlayActive = true;
+    _addLog('🚨 متطفل detected! جاري إيقاف الكاميرا...');
+
+    // 1. إيقاف بث الكاميرا فوراً
+    try {
+      if (_cameraController != null &&
+          _cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
+      }
+    } catch (_) {}
+
+    // 2. فتح الأوفرلاي
+    await _showBlackOverlay();
+
+    // 3. انتظار 30 ثانية
+    await Future.delayed(const Duration(seconds: 30));
+
+    // 4. إغلاق الأوفرلاي واستئناف الكاميرا
+    await _hideBlackOverlay();
+    await _resumeCamera();
+
+    _isOverlayActive = false;
+    _addLog('✅ انتهى التنبيه، عادت المراقبة');
+  }
+
+  Future<void> _resumeCamera() async {
+    try {
+      if (_cameraController != null) {
+        if (!_cameraController!.value.isInitialized) {
+          await _cameraController!.initialize();
+        }
+        if (!_cameraController!.value.isStreamingImages) {
+          await _cameraController!.startImageStream(_onCameraImage);
+        }
+      }
+    } catch (e) {
+      _addLog('❌ فشل استئناف الكاميرا: $e');
+    }
+  }
+
+  Future<void> _stopCameraMonitoring() async {
+    _isMonitoring = false;
+    _frameTimer?.cancel();
+    try {
+      if (_cameraController != null &&
+          _cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
+      }
+      await _cameraController?.dispose();
+      _cameraController = null;
+    } catch (_) {}
+    _detectionService?.dispose();
+    _detectionService = null;
+    _addLog('🛑 تم إيقاف الكاميرا');
+  }
+
+  // ============ الأوفرلاي ============
   Future<void> _showBlackOverlay() async {
     if (!await FlutterOverlayWindow.isPermissionGranted()) {
       await FlutterOverlayWindow.requestPermission();
@@ -91,15 +205,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       enableDrag: false,
       flag: OverlayFlag.defaultFlag,
     );
-    await FlutterOverlayWindow.shareData({
-      'opacity': _settings.overlayOpacity,
-    });
+    await FlutterOverlayWindow.shareData({'opacity': _settings.overlayOpacity});
   }
 
   Future<void> _hideBlackOverlay() async {
     await FlutterOverlayWindow.closeOverlay();
   }
 
+  // ============ الأذونات ============
   Future<void> _requestPermissions() async {
     final cameraStatus = await Permission.camera.request();
     final overlayStatus = await Permission.systemAlertWindow.request();
@@ -113,41 +226,49 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _addLog('⚠️ بعض الأذونات مفقودة');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permissions are required to run the service.')),
+          const SnackBar(content: Text('Permissions are required.')),
         );
       }
     }
   }
 
+  // ============ تشغيل/إيقاف الخدمة ============
   Future<void> _toggleService() async {
     if (_settings.isRunning) {
+      // إيقاف
+      await _stopCameraMonitoring();
       await FlutterForegroundTask.stopService();
       _settings.setRunning(false);
       _addLog('🛑 تم إيقاف الخدمة');
     } else {
-      if (!await Permission.camera.isGranted) {
+      // تشغيل
+      if (!await Permission.camera.isGranted ||
+          !await Permission.systemAlertWindow.isGranted) {
         await _requestPermissions();
         if (!await Permission.camera.isGranted) return;
-      }
-      if (!await Permission.systemAlertWindow.isGranted) {
-        await _requestPermissions();
         if (!await Permission.systemAlertWindow.isGranted) return;
       }
 
+      // بدء الخدمة الأمامية (للحفاظ على التطبيق حياً)
       await FlutterForegroundTask.startService(
         serviceId: 100,
         notificationTitle: 'Intruder Shield Active',
         notificationText: 'Monitoring front camera...',
         callback: startCallback,
       );
+
+      // بدء الكاميرا في الواجهة
+      await _startCameraMonitoring();
+
       _settings.setRunning(true);
-      _addLog('▶️ تم بدء الخدمة، في انتظار الكاميرا...');
+      _addLog('▶️ تم بدء الخدمة والكاميرا');
     }
   }
 
   @override
   void dispose() {
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
+    _stopCameraMonitoring();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -216,7 +337,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // سجل التشخيص
                   Expanded(
                     child: Container(
                       width: double.infinity,
