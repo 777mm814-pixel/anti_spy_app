@@ -15,6 +15,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final _settings = AppSettings();
+  final List<String> _logs = [];
 
   @override
   void initState() {
@@ -43,15 +44,38 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _addLog(String message) {
+    if (!mounted) return;
+    setState(() {
+      _logs.insert(0, '[${DateTime.now().toString().substring(11, 19)}] $message');
+      if (_logs.length > 20) _logs.removeLast();
+    });
+  }
+
   void _onReceiveTaskData(Object data) {
-    if (data is Map) {
-      if (data['action'] == 'SHOW_OVERLAY') {
+    if (data is! Map) return;
+
+    switch (data['action']) {
+      case 'SHOW_OVERLAY':
+        _addLog('🚨 متطفل detected! وجهان أو أكثر (count: ${data['faceCount']})');
         _showBlackOverlay();
-      } else if (data['action'] == 'HIDE_OVERLAY') {
+        break;
+      case 'HIDE_OVERLAY':
+        _addLog('✅ إغلاق الأوفرلاي واستئناف المراقبة');
         _hideBlackOverlay();
-      } else if (data['error'] != null) {
-        debugPrint('Task error: ${data['error']}');
-      }
+        break;
+      case 'CAMERA_READY':
+        _addLog('📷 الكاميرا جاهزة (${data['resolution']})');
+        break;
+      case 'FACE_RESULT':
+        _addLog('👁️ وجوه: ${data['count']} | إطار: ${data['frameSize']}');
+        break;
+      case 'DIAGNOSTIC':
+        _addLog('📊 إطارات: ${data['frames']} | اكتشافات: ${data['faces']} | Overlay: ${data['overlayActive']}');
+        break;
+      case 'ERROR':
+        _addLog('❌ خطأ: ${data['message']}');
+        break;
     }
   }
 
@@ -84,11 +108,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (!mounted) return;
 
     if (cameraStatus.isGranted && overlayStatus.isGranted) {
-      setState(() {});
+      _addLog('✅ جميع الأذونات ممنوحة');
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permissions are required to run the service.')),
-      );
+      _addLog('⚠️ بعض الأذونات مفقودة');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permissions are required to run the service.')),
+        );
+      }
     }
   }
 
@@ -96,6 +123,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (_settings.isRunning) {
       await FlutterForegroundTask.stopService();
       _settings.setRunning(false);
+      _addLog('🛑 تم إيقاف الخدمة');
     } else {
       if (!await Permission.camera.isGranted) {
         await _requestPermissions();
@@ -113,6 +141,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         callback: startCallback,
       );
       _settings.setRunning(true);
+      _addLog('▶️ تم بدء الخدمة، في انتظار الكاميرا...');
     }
   }
 
@@ -135,22 +164,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               centerTitle: true,
             ),
             body: Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(16.0),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
                     settings.isRunning ? Icons.shield : Icons.shield_outlined,
-                    size: 100,
+                    size: 80,
                     color: settings.isRunning ? Colors.green : Colors.grey,
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
                   Text(
-                    settings.isRunning ? 'Monitoring Active' : 'Monitoring Stopped',
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    settings.isRunning ? 'المراقبة نشطة' : 'المراقبة متوقفة',
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 40),
-                  Text('Overlay Opacity: ${(settings.overlayOpacity * 100).toInt()}%'),
+                  const SizedBox(height: 20),
+                  Text('شفافية الأوفرلاي: ${(settings.overlayOpacity * 100).toInt()}%'),
                   Slider(
                     value: settings.overlayOpacity,
                     min: 0.3,
@@ -160,21 +188,64 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       FlutterOverlayWindow.shareData({'opacity': value});
                     },
                   ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _requestPermissions,
-                    icon: const Icon(Icons.security),
-                    label: const Text('Request Permissions'),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _requestPermissions,
+                          icon: const Icon(Icons.security, size: 18),
+                          label: const Text('الأذونات'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _toggleService,
+                          icon: Icon(
+                            settings.isRunning ? Icons.stop : Icons.play_arrow,
+                            size: 18,
+                          ),
+                          label: Text(settings.isRunning ? 'إيقاف' : 'تشغيل'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: settings.isRunning ? Colors.red : Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _toggleService,
-                    icon: Icon(settings.isRunning ? Icons.stop : Icons.play_arrow),
-                    label: Text(settings.isRunning ? 'Stop Service' : 'Start Service'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: settings.isRunning ? Colors.red : Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                  const SizedBox(height: 16),
+                  // سجل التشخيص
+                  Expanded(
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '📋 سجل التشخيص:',
+                            style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          Expanded(
+                            child: ListView.builder(
+                              itemCount: _logs.length,
+                              itemBuilder: (context, index) {
+                                return Text(
+                                  _logs[index],
+                                  style: const TextStyle(color: Colors.white70, fontSize: 11, fontFamily: 'monospace'),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

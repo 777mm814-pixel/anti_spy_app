@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:camera/camera.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:intruder_shield/services/detection_service.dart';
 
 @pragma('vm:entry-point')
 void startCallback() {
+  // ✅ ضروري جداً: تسجيل plugins في العزل الخلفي (بدونها camera لا تعمل)
+  WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
   FlutterForegroundTask.setTaskHandler(IntruderTaskHandler());
 }
 
@@ -15,37 +20,59 @@ class IntruderTaskHandler extends TaskHandler {
   bool _isMonitoring = false;
   bool _isOverlayActive = false;
   int _lastProcessedMs = 0;
+  int _frameCount = 0;
+  int _faceDetectionCount = 0;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     _detectionService = DetectionService();
     await _initCamera();
     _isMonitoring = true;
+
+    // مؤقت لتشخيص الحالة كل 10 ثوانٍ
     _processingTimer?.cancel();
-    _processingTimer = Timer.periodic(const Duration(milliseconds: 800), (timer) async {
-      if (!_isMonitoring || _isOverlayActive) return;
+    _processingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (!_isMonitoring) return;
+      FlutterForegroundTask.sendDataToMain({
+        'action': 'DIAGNOSTIC',
+        'frames': _frameCount,
+        'faces': _faceDetectionCount,
+        'overlayActive': _isOverlayActive,
+      });
     });
   }
 
   Future<void> _initCamera() async {
     try {
       final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        _sendError('No cameras available');
+        return;
+      }
+
       final frontCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
 
+      // ✅ استخدام medium بدلاً من low (480p) لأن ML Kit يحتاج 480x360 على الأقل
       _cameraController = CameraController(
         frontCamera,
-        ResolutionPreset.low,
+        ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       await _cameraController!.initialize();
       await _cameraController!.startImageStream(_onCameraImage);
+
+      FlutterForegroundTask.sendDataToMain({
+        'action': 'CAMERA_READY',
+        'resolution':
+            '${_cameraController!.value.previewSize?.width.toInt()}x${_cameraController!.value.previewSize?.height.toInt()}',
+      });
     } catch (e) {
-      FlutterForegroundTask.sendDataToMain({'error': 'Camera init failed: $e'});
+      _sendError('Camera init failed: $e');
     }
   }
 
@@ -53,6 +80,9 @@ class IntruderTaskHandler extends TaskHandler {
     if (!_isMonitoring || _isOverlayActive) return;
     if (_detectionService == null || _cameraController == null) return;
 
+    _frameCount++;
+
+    // تقييد المعالجة: لا تعالج أكثر من إطار كل 800 مللي ثانية
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastProcessedMs < 800) return;
     _lastProcessedMs = now;
@@ -62,10 +92,25 @@ class IntruderTaskHandler extends TaskHandler {
         image,
         _cameraController!.description,
       );
+
+      if (faceCount > 0) {
+        _faceDetectionCount++;
+      }
+
+      // إرسال نتيجة كل معالجة للواجهة (للتشخيص)
+      FlutterForegroundTask.sendDataToMain({
+        'action': 'FACE_RESULT',
+        'count': faceCount,
+        'frameSize': '${image.width}x${image.height}',
+      });
+
+      // المنطق الذكي: إذا كان هناك متطفل (وجهان أو أكثر)
       if (faceCount >= 2 && !_isOverlayActive) {
         await _handleIntruderDetected();
       }
-    } catch (_) {}
+    } catch (e) {
+      _sendError('Face detection error: $e');
+    }
   }
 
   Future<void> _handleIntruderDetected() async {
@@ -83,15 +128,17 @@ class IntruderTaskHandler extends TaskHandler {
     FlutterForegroundTask.sendDataToMain({
       'action': 'SHOW_OVERLAY',
       'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'faceCount': _faceDetectionCount,
     });
 
-    // 3. انتظار 30 ثانية (المدة التي تظهر فيها الشاشة السوداء)
+    // 3. انتظار 30 ثانية
     await Future.delayed(const Duration(seconds: 30));
 
     // 4. إغلاق الأوفرلاي واستئناف الكاميرا
     FlutterForegroundTask.sendDataToMain({'action': 'HIDE_OVERLAY'});
     await _resumeCamera();
     _isOverlayActive = false;
+    _faceDetectionCount = 0;
   }
 
   Future<void> _resumeCamera() async {
@@ -105,13 +152,16 @@ class IntruderTaskHandler extends TaskHandler {
         }
       }
     } catch (e) {
-      FlutterForegroundTask.sendDataToMain({'error': 'Resume camera failed: $e'});
+      _sendError('Resume camera failed: $e');
     }
+  }
+
+  void _sendError(String message) {
+    FlutterForegroundTask.sendDataToMain({'action': 'ERROR', 'message': message});
   }
 
   @override
   void onRepeatEvent(DateTime timestamp) {
-    // يتم استدعاؤها كل 5 ثوانٍ حسب إعدادات الخدمة
     if (!_isMonitoring && !_isOverlayActive) {
       _initCamera();
       _isMonitoring = true;
