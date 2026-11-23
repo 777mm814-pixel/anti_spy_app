@@ -80,12 +80,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
-      // ✅ نطلب nv21 مباشرة لتفادي مشاكل التحويل
+      // ✅ نطلب yuv420 (الأكثر استقراراً) وسنقوم بتحويلها بأنفسنا
       _cameraController = CameraController(
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21,
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       await _cameraController!.initialize();
