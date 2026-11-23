@@ -1,6 +1,6 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui';
 import 'package:camera/camera.dart';
-import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 class DetectionService {
@@ -13,13 +13,13 @@ class DetectionService {
         enableLandmarks: false,
         enableContours: false,
         enableTracking: false,
-        minFaceSize: 0.05, // تصغير الحجم قليلاً لضمان اكتشاف الوجوه
+        minFaceSize: 0.1, // الحجم الأدنى للوجه (10% من الصورة)
       ),
     );
   }
 
   Future<int> processCameraImage(CameraImage image, CameraDescription camera) async {
-    final InputImage? inputImage = _inputImageFromCameraImage(image, camera);
+    final InputImage? inputImage = _inputImageFromCameraImage(image);
     if (inputImage == null) return 0;
 
     try {
@@ -30,90 +30,108 @@ class DetectionService {
     }
   }
 
-  InputImage? _inputImageFromCameraImage(CameraImage image, CameraDescription camera) {
-    final sensorOrientation = camera.sensorOrientation;
-    InputImageRotation? rotation;
-
-    if (Platform.isAndroid) {
-      // التطبيق يعمل في الوضع العمودي دائماً (portraitUp = 0)
-      int rotationCompensation = 0; 
-      
-      int finalRotation;
-      if (camera.lensDirection == CameraLensDirection.front) {
-        finalRotation = (sensorOrientation + rotationCompensation) % 360;
-      } else {
-        finalRotation = (sensorOrientation - rotationCompensation + 360) % 360;
-      }
-      rotation = InputImageRotationValue.fromRawValue(finalRotation);
-    } else if (Platform.isIOS) {
-      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
-    }
-
-    if (rotation == null) return null;
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    final int width = image.width;
+    final int height = image.height;
+    
+    // ✅ بناءً على طلبك: بدون أي تدوير
+    const rotation = InputImageRotation.rotation0deg;
+    
+    Uint8List? cleanBytes;
 
     // إذا كانت الصورة NV21 (مستوى واحد)
-    if (image.planes.length == 1) {
-      final plane = image.planes.first;
-      return InputImage.fromBytes(
-        bytes: plane.bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: rotation,
-          format: InputImageFormat.nv21,
-          bytesPerRow: plane.bytesPerRow,
-        ),
-      );
+    if (image.format.group == ImageFormatGroup.nv21) {
+      cleanBytes = _cleanNv21(image);
     } 
-    // إذا كانت الصورة YUV420 (ثلاثة مستويات) - وهي الأكثر شيوعاً
+    // إذا كانت YUV420 (ثلاثة مستويات) - كاحتياط
     else if (image.planes.length == 3) {
-      final nv21Bytes = _yuv420ToNv21(image);
-      if (nv21Bytes.isEmpty) return null;
-
-      return InputImage.fromBytes(
-        bytes: nv21Bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: rotation,
-          format: InputImageFormat.nv21,
-          bytesPerRow: image.width, // العرض الفعلي لأننا نظفنا البيانات
-        ),
-      );
+      cleanBytes = _yuv420ToNv21(image);
     }
 
-    return null;
+    if (cleanBytes == null || cleanBytes.isEmpty) return null;
+
+    return InputImage.fromBytes(
+      bytes: cleanBytes,
+      metadata: InputImageMetadata(
+        size: Size(width.toDouble(), height.toDouble()),
+        rotation: rotation,
+        format: InputImageFormat.nv21,
+        // نمرر العرض الفعلي لأننا قمنا بتنظيف المصفوفة وجعلها بالحجم الدقيق
+        bytesPerRow: width,
+      ),
+    );
   }
 
-  /// تحويل دقيق جداً من YUV420 إلى NV21
-  Uint8List _yuv420ToNv21(CameraImage image) {
+  /// دالة تنظيف NV21: تضمن أن حجم المصفوفة بالضبط = العرض * الطول * 1.5
+  Uint8List? _cleanNv21(CameraImage image) {
     try {
-      final width = image.width;
-      final height = image.height;
-      final ySize = width * height;
-      final uvSize = ySize ~/ 4;
-      final nv21 = Uint8List(ySize + uvSize * 2);
+      final int width = image.width;
+      final int height = image.height;
+      final int expectedSize = width * height * 3 ~/ 2;
+      final Plane plane = image.planes.first;
 
-      final yPlane = image.planes[0];
-      final uPlane = image.planes[1];
-      final vPlane = image.planes[2];
+      // إذا كانت البيانات مثالية، نرجعها كما هي
+      if (plane.bytesPerRow == width && plane.bytes.length == expectedSize) {
+        return plane.bytes;
+      }
 
+      // إذا كان هناك حشوة (Padding)، ننشئ مصفوفة نظيفة وننسخ البيانات
+      final Uint8List cleanBytes = Uint8List(expectedSize);
       int pos = 0;
+      final int rowStride = plane.bytesPerRow;
 
       // 1. نسخ مستوى Y
       for (int row = 0; row < height; row++) {
-        final rowStart = row * yPlane.bytesPerRow;
+        final int start = row * rowStride;
+        if (start + width <= plane.bytes.length) {
+          cleanBytes.setRange(pos, pos + width, plane.bytes, start);
+          pos += width;
+        }
+      }
+
+      // 2. نسخ مستوى VU
+      for (int row = 0; row < height ~/ 2; row++) {
+        final int start = (height + row) * rowStride;
+        if (start + width <= plane.bytes.length) {
+          cleanBytes.setRange(pos, pos + width, plane.bytes, start);
+          pos += width;
+        }
+      }
+
+      return cleanBytes;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// دالة تحويل YUV420 إلى NV21 (احتياط)
+  Uint8List? _yuv420ToNv21(CameraImage image) {
+    try {
+      final int width = image.width;
+      final int height = image.height;
+      final int ySize = width * height;
+      final int uvSize = ySize ~/ 4;
+      final Uint8List nv21 = Uint8List(ySize + uvSize * 2);
+
+      final Plane yPlane = image.planes[0];
+      final Plane uPlane = image.planes[1];
+      final Plane vPlane = image.planes[2];
+
+      int pos = 0;
+      for (int row = 0; row < height; row++) {
+        final int rowStart = row * yPlane.bytesPerRow;
         for (int col = 0; col < width; col++) {
           nv21[pos++] = yPlane.bytes[rowStart + col];
         }
       }
 
-      // 2. نسخ مستوى VU (متشابك)
-      final uvRowStride = uPlane.bytesPerRow;
-      final uvPixelStride = uPlane.bytesPerPixel ?? 2;
+      final int uvRowStride = uPlane.bytesPerRow;
+      final int uvPixelStride = uPlane.bytesPerPixel ?? 2;
 
       for (int row = 0; row < height ~/ 2; row++) {
-        final rowStart = row * uvRowStride;
+        final int rowStart = row * uvRowStride;
         for (int col = 0; col < width ~/ 2; col++) {
-          final index = rowStart + col * uvPixelStride;
+          final int index = rowStart + col * uvPixelStride;
           if (index < vPlane.bytes.length && pos < nv21.length) {
             nv21[pos++] = vPlane.bytes[index]; // V
           }
@@ -123,8 +141,8 @@ class DetectionService {
         }
       }
       return nv21;
-    } catch (_) {
-      return Uint8List(0);
+    } catch (e) {
+      return null;
     }
   }
 
