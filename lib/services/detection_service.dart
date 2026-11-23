@@ -13,13 +13,13 @@ class DetectionService {
         enableLandmarks: false,
         enableContours: false,
         enableTracking: false,
-        minFaceSize: 0.1, // الحجم الأدنى للوجه (10% من الصورة)
+        minFaceSize: 0.15, // 15% من حجم الصورة (لضمان عدم الخلط)
       ),
     );
   }
 
   Future<int> processCameraImage(CameraImage image, CameraDescription camera) async {
-    final InputImage? inputImage = _inputImageFromCameraImage(image);
+    final InputImage? inputImage = _inputImageFromCameraImage(image, camera);
     if (inputImage == null) return 0;
 
     try {
@@ -30,21 +30,29 @@ class DetectionService {
     }
   }
 
-  InputImage? _inputImageFromCameraImage(CameraImage image) {
+  InputImage? _inputImageFromCameraImage(CameraImage image, CameraDescription camera) {
     final int width = image.width;
     final int height = image.height;
+
+    // ✅ الحل الأول: حساب التدوير الصحيح ديناميكياً
+    final sensorOrientation = camera.sensorOrientation;
+    int rotationCompensation = 0; // بما أن التطبيق portraitUp
     
-    // ✅ بناءً على طلبك: بدون أي تدوير
-    const rotation = InputImageRotation.rotation0deg;
+    int finalRotation;
+    if (camera.lensDirection == CameraLensDirection.front) {
+      finalRotation = (sensorOrientation + rotationCompensation) % 360;
+    } else {
+      finalRotation = (sensorOrientation - rotationCompensation + 360) % 360;
+    }
     
+    final rotation = InputImageRotationValue.fromRawValue(finalRotation);
+    if (rotation == null) return null;
+
     Uint8List? cleanBytes;
 
-    // إذا كانت الصورة NV21 (مستوى واحد)
     if (image.format.group == ImageFormatGroup.nv21) {
       cleanBytes = _cleanNv21(image);
-    } 
-    // إذا كانت YUV420 (ثلاثة مستويات) - كاحتياط
-    else if (image.planes.length == 3) {
+    } else if (image.planes.length == 3) {
       cleanBytes = _yuv420ToNv21(image);
     }
 
@@ -56,13 +64,12 @@ class DetectionService {
         size: Size(width.toDouble(), height.toDouble()),
         rotation: rotation,
         format: InputImageFormat.nv21,
-        // نمرر العرض الفعلي لأننا قمنا بتنظيف المصفوفة وجعلها بالحجم الدقيق
-        bytesPerRow: width,
+        bytesPerRow: width, // نمرر العرض الفعلي
       ),
     );
   }
 
-  /// دالة تنظيف NV21: تضمن أن حجم المصفوفة بالضبط = العرض * الطول * 1.5
+  /// ✅ الحل الثاني: دالة تنظيف NV21 تضمن إزالة أي Padding
   Uint8List? _cleanNv21(CameraImage image) {
     try {
       final int width = image.width;
@@ -75,12 +82,13 @@ class DetectionService {
         return plane.bytes;
       }
 
-      // إذا كان هناك حشوة (Padding)، ننشئ مصفوفة نظيفة وننسخ البيانات
+      // إذا كان هناك حشوة (Padding)، ننشئ مصفوفة نظيفة
       final Uint8List cleanBytes = Uint8List(expectedSize);
       int pos = 0;
       final int rowStride = plane.bytesPerRow;
-
-      // 1. نسخ مستوى Y
+      
+      // في NV21، يتم دمج Y و VU في مصفوفة واحدة
+      // مستوى Y
       for (int row = 0; row < height; row++) {
         final int start = row * rowStride;
         if (start + width <= plane.bytes.length) {
@@ -89,7 +97,7 @@ class DetectionService {
         }
       }
 
-      // 2. نسخ مستوى VU
+      // مستوى VU
       for (int row = 0; row < height ~/ 2; row++) {
         final int start = (height + row) * rowStride;
         if (start + width <= plane.bytes.length) {
@@ -104,7 +112,6 @@ class DetectionService {
     }
   }
 
-  /// دالة تحويل YUV420 إلى NV21 (احتياط)
   Uint8List? _yuv420ToNv21(CameraImage image) {
     try {
       final int width = image.width;
@@ -133,10 +140,10 @@ class DetectionService {
         for (int col = 0; col < width ~/ 2; col++) {
           final int index = rowStart + col * uvPixelStride;
           if (index < vPlane.bytes.length && pos < nv21.length) {
-            nv21[pos++] = vPlane.bytes[index]; // V
+            nv21[pos++] = vPlane.bytes[index];
           }
           if (index < uPlane.bytes.length && pos < nv21.length) {
-            nv21[pos++] = uPlane.bytes[index]; // U
+            nv21[pos++] = uPlane.bytes[index];
           }
         }
       }
