@@ -80,7 +80,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
-      // ✅ طلب NV21 مباشرة (يدعمه أندرويد) لتجنب التحويل اليدوي
+      // نطلب NV21 مباشرة لتقليل المعالجة
       _cameraController = CameraController(
         frontCamera,
         ResolutionPreset.medium,
@@ -112,8 +112,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     _frameCount++;
 
-    // سجل تشخيصي لأول 5 إطارات فقط
-    if (_frameCount <= 5) {
+    // سجل تشخيصي لأول 3 إطارات فقط
+    if (_frameCount <= 3) {
       _addLog('📸 ${image.format.group} | ${image.planes.length} planes | ${image.width}x${image.height}');
     }
 
@@ -129,13 +129,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
       if (!mounted) return;
 
-      _addLog('👁️ وجوه: $faceCount | إطار: ${image.width}x${image.height}');
+      // سجل النتيجة (مرة كل 5 إطارات لتقليل الزحام)
+      if (_frameCount % 5 == 0) {
+        _addLog('👁️ وجوه: $faceCount | إطار: ${image.width}x${image.height}');
+      }
 
       if (faceCount >= 2 && !_isOverlayActive) {
         await _handleIntruderDetected();
       }
     } catch (e) {
-      _addLog('❌ خطأ في الكشف: $e');
+      if (_frameCount <= 3) {
+        _addLog('❌ خطأ في الكشف: $e');
+      }
     }
   }
 
