@@ -80,12 +80,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
-      // نطلب NV21 مباشرة لتقليل المعالجة
+      // ✅ نطلب YUV420 لأنها الأكثر استقراراً
       _cameraController = CameraController(
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21,
+        imageFormatGroup: ImageFormatGroup.yuv420, 
       );
 
       await _cameraController!.initialize();
@@ -112,7 +112,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     _frameCount++;
 
-    // سجل تشخيصي لأول 3 إطارات فقط
     if (_frameCount <= 3) {
       _addLog('📸 ${image.format.group} | ${image.planes.length} planes | ${image.width}x${image.height}');
     }
@@ -129,7 +128,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
       if (!mounted) return;
 
-      // سجل النتيجة (مرة كل 5 إطارات لتقليل الزحام)
       if (_frameCount % 5 == 0) {
         _addLog('👁️ وجوه: $faceCount | إطار: ${image.width}x${image.height}');
       }
