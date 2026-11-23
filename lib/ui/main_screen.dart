@@ -20,13 +20,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final _settings = AppSettings();
   final List<String> _logs = [];
 
-  // إدارة الكاميرا والكشف في الواجهة
   CameraController? _cameraController;
   DetectionService? _detectionService;
   Timer? _frameTimer;
   int _lastProcessedMs = 0;
   bool _isMonitoring = false;
   bool _isOverlayActive = false;
+  int _frameCount = 0;
 
   @override
   void initState() {
@@ -65,12 +65,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _onReceiveTaskData(Object data) {
     if (data is! Map) return;
-    if (data['action'] == 'SERVICE_ALIVE') {
-      // الخدمة حية، لا حاجة لفعل شيء
-    }
   }
 
-  // ============ إدارة الكاميرا (في الواجهة) ============
   Future<void> _startCameraMonitoring() async {
     try {
       final cameras = await availableCameras();
@@ -84,21 +80,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
+      // ✅ طلب NV21 مباشرة (يدعمه أندرويد) لتجنب التحويل اليدوي
       _cameraController = CameraController(
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,
+        imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await _cameraController!.initialize();
       _detectionService ??= DetectionService();
       _isMonitoring = true;
+      _frameCount = 0;
 
       await _cameraController!.startImageStream(_onCameraImage);
       _addLog('📷 الكاميرا جاهزة (${_cameraController!.value.previewSize?.width.toInt()}x${_cameraController!.value.previewSize?.height.toInt()})');
 
-      // مؤقت لتشخيص الحالة
       _frameTimer?.cancel();
       _frameTimer = Timer.periodic(const Duration(seconds: 10), (_) {
         if (!_isMonitoring) return;
@@ -112,6 +109,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _onCameraImage(CameraImage image) async {
     if (!_isMonitoring || _isOverlayActive) return;
     if (_detectionService == null || _cameraController == null) return;
+
+    _frameCount++;
+
+    // سجل تشخيصي لأول 5 إطارات فقط
+    if (_frameCount <= 5) {
+      _addLog('📸 ${image.format.group} | ${image.planes.length} planes | ${image.width}x${image.height}');
+    }
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastProcessedMs < 800) return;
@@ -139,7 +143,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _isOverlayActive = true;
     _addLog('🚨 متطفل detected! جاري إيقاف الكاميرا...');
 
-    // 1. إيقاف بث الكاميرا فوراً
     try {
       if (_cameraController != null &&
           _cameraController!.value.isStreamingImages) {
@@ -147,13 +150,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       }
     } catch (_) {}
 
-    // 2. فتح الأوفرلاي
     await _showBlackOverlay();
-
-    // 3. انتظار 30 ثانية
     await Future.delayed(const Duration(seconds: 30));
-
-    // 4. إغلاق الأوفرلاي واستئناف الكاميرا
     await _hideBlackOverlay();
     await _resumeCamera();
 
@@ -192,7 +190,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _addLog('🛑 تم إيقاف الكاميرا');
   }
 
-  // ============ الأوفرلاي ============
   Future<void> _showBlackOverlay() async {
     if (!await FlutterOverlayWindow.isPermissionGranted()) {
       await FlutterOverlayWindow.requestPermission();
@@ -212,7 +209,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     await FlutterOverlayWindow.closeOverlay();
   }
 
-  // ============ الأذونات ============
   Future<void> _requestPermissions() async {
     final cameraStatus = await Permission.camera.request();
     final overlayStatus = await Permission.systemAlertWindow.request();
@@ -232,16 +228,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ============ تشغيل/إيقاف الخدمة ============
   Future<void> _toggleService() async {
     if (_settings.isRunning) {
-      // إيقاف
       await _stopCameraMonitoring();
       await FlutterForegroundTask.stopService();
       _settings.setRunning(false);
       _addLog('🛑 تم إيقاف الخدمة');
     } else {
-      // تشغيل
       if (!await Permission.camera.isGranted ||
           !await Permission.systemAlertWindow.isGranted) {
         await _requestPermissions();
@@ -249,7 +242,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         if (!await Permission.systemAlertWindow.isGranted) return;
       }
 
-      // بدء الخدمة الأمامية (للحفاظ على التطبيق حياً)
       await FlutterForegroundTask.startService(
         serviceId: 100,
         notificationTitle: 'Intruder Shield Active',
@@ -257,7 +249,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         callback: startCallback,
       );
 
-      // بدء الكاميرا في الواجهة
       await _startCameraMonitoring();
 
       _settings.setRunning(true);
